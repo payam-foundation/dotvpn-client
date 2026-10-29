@@ -117,7 +117,7 @@ func linuxDNS(u *undo, c sysConfig) error {
 	if err := os.WriteFile(path, []byte("nameserver "+tunDNS+"\n"), 0o644); err != nil {
 		return err
 	}
-	u.add(func() { _ = os.WriteFile(path, old, 0o644) })
+	u.add(func() { _ = os.WriteFile(path, old, 0o644) }) // #nosec G703 -- constant path
 	return nil
 }
 
