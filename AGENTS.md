@@ -11,7 +11,7 @@ go build ./... && go vet ./...
 go test -race -count=1 ./...
 ```
 
-`go.mod` has `replace github.com/payam-foundation/dotvpn-wire => ../dotvpn-wire`. CI drops it and tests the pinned wire tag and wire `main`.
+`go.mod` pins an exact `dotvpn-wire` tag and has no `replace`. For side-by-side work use an untracked `go.work` in the parent directory (see CONTRIBUTING.md). CI tests the pinned wire tag and wire `main`.
 
 ## Invariants
 
@@ -31,3 +31,7 @@ go test -race -count=1 ./...
 ## Docs
 
 `docs/adr/`: ADR-009. Security report: `../dotvpn-lab/docs/REPORT.md`.
+
+## Flow
+
+Pull requests only, never push to `main`. PR title is a Conventional Commit, commits are signed off (`git commit -s`), merges are squash-only. Releases come from release-please. See `CONTRIBUTING.md`.
