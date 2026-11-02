@@ -17,29 +17,20 @@ Carriers race with a short stagger (happy eyeballs). The last winner goes first 
 
 ```mermaid
 flowchart TD
-    start["Start with invite or config"]
-    h3["HTTP/3 CONNECT"]
-    h2["HTTP/2 CONNECT"]
-    cdn["CDN WebSocket"]
-    wt["WebTunnel"]
-    snow["Snowflake"]
-    relay["Reverse relay"]
-    ok["Connected: probe through the session succeeded"]
-    ks["No carrier works: kill switch stays closed, retry in background"]
+    start(["Invite or config"])
+    race["Race next carriers, staggered<br/>h3 → h2 → cdnws → webtunnel → snowflake → reverse relay"]
+    probe{"Probe request through<br/>the session succeeds?"}
+    ok(["Connected"])
+    ks["Kill switch stays closed<br/>retry in background"]
 
-    start --> h3
-    h3 -->|"blocked or slow"| h2
-    h2 -->|"blocked or slow"| cdn
-    cdn -->|"blocked or slow"| wt
-    wt -->|"blocked or slow"| snow
-    snow -->|"blocked or slow"| relay
-    h3 -->|"ok"| ok
-    h2 -->|"ok"| ok
-    cdn -->|"ok"| ok
-    wt -->|"ok"| ok
-    snow -->|"ok"| ok
-    relay -->|"ok"| ok
-    relay -->|"blocked"| ks
+    start -->|"last winner first"| race
+    race -->|"session up"| probe
+    probe -->|"yes"| ok
+    probe -->|"no, blocked or slow"| race
+    race -->|"ladder exhausted"| ks
+
+    classDef focal fill:#fdf0ea,stroke:#eb6c36,color:#2d3142
+    class probe focal
 ```
 
 The order is a default. The server list and your config decide which endpoints exist, and the engine reorders them by recent success.
