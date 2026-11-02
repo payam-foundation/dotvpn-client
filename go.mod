@@ -83,5 +83,3 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 	gvisor.dev/gvisor v0.0.0-20250503011706-39ed1f5ac29c
 )
-
-replace github.com/payam-foundation/dotvpn-wire => ../dotvpn-wire
