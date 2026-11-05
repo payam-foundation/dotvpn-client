@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/readme-header-dark.svg">
+  <img alt="Dot VPN" src=".github/readme-header-light.svg">
+</picture>
+
 # dotvpn-client
 
 [![CI](https://github.com/payam-foundation/dotvpn-client/actions/workflows/ci.yml/badge.svg)](https://github.com/payam-foundation/dotvpn-client/actions/workflows/ci.yml)
@@ -5,7 +10,7 @@
 [![Status: beta](https://img.shields.io/badge/status-beta-orange)](#status)
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue)](LICENSE)
 
-The client of [dotvpn](https://github.com/payam-foundation/dotvpn-wire#related-repositories): a Go library and the `dotvpn` command for Linux, macOS and Windows. It runs a local SOCKS5/HTTP proxy or a full-device tunnel, and walks a fallback ladder of carriers until one works under the network you are on.
+The client of [Dot VPN](https://github.com/payam-foundation/dotvpn-wire#related-repositories): a Go library and the `dotvpn` command for Linux, macOS and Windows. It runs a local SOCKS5/HTTP proxy or a full-device tunnel, and walks a fallback ladder of carriers until one works under the network you are on.
 
 ## Status
 
