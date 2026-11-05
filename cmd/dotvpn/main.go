@@ -152,6 +152,7 @@ func serve(ctx context.Context, c *config.Config, path string, log *slog.Logger)
 		lp.Auth = client.StaticAuth(u, p)
 	}
 	go func() { errc <- lp.Serve(ctx, ln) }()
+	go announce(ctx, eng, useColor(os.Stdout, os.Getenv("NO_COLOR")))
 	if bypass != nil {
 		rt, err := router.New(router.Config{
 			DirectDomains: c.Routing.DirectDomains, DirectCIDRs: c.Routing.DirectCIDRs,
@@ -191,4 +192,45 @@ func configPath(flagVal string) string {
 		d = "."
 	}
 	return filepath.Join(d, "dotvpn", "client.yaml")
+}
+
+// announce prints "connected via <carrier>" on stdout each time the active
+// carrier changes, so a person at a terminal sees the state without log noise.
+func announce(ctx context.Context, eng *client.Engine, color bool) {
+	last := ""
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+	for {
+		if cur := eng.Status(); cur != last {
+			last = cur
+			if cur != "" {
+				fmt.Println(connectedLine(cur, color))
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// connectedLine colours only the word that means connected: Dot VPN lime
+// (#C6F432), per the design guidelines.
+func connectedLine(carrier string, color bool) string {
+	word := "connected"
+	if color {
+		word = "\x1b[38;2;198;244;50m" + word + "\x1b[0m"
+	}
+	return word + " via " + carrier
+}
+
+// useColor is true only for a terminal, and never when NO_COLOR is set to a
+// non-empty value (https://no-color.org).
+func useColor(f *os.File, noColor string) bool {
+	if noColor != "" {
+		return false
+	}
+	fi, err := f.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
