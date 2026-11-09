@@ -20,6 +20,8 @@ type sysConfig struct {
 	Name       string
 	MTU        int
 	Phys       *net.Interface
+	Gateway    net.IP   // physical default gateway when the bypass was created
+	PinHosts   []net.IP // /32 host routes via Gateway (DNS, control, nodes)
 	KillSwitch bool
 	Log        *slog.Logger
 }

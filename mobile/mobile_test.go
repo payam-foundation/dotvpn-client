@@ -31,7 +31,7 @@ func TestImportInvite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !c.Tun.Enabled || c.Token != "tok" || len(c.Endpoints) != 1 {
+	if !c.Tun.TunnelOn() || c.Token != "tok" || len(c.Endpoints) != 1 {
 		t.Fatalf("config = %+v", c)
 	}
 	if l, err := Endpoints(y); err != nil || strings.TrimSpace(l) == "" {

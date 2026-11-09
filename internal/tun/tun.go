@@ -66,9 +66,15 @@ type Config struct {
 	Router *router.Router
 	// KillSwitch blocks all traffic that is neither tunnelled nor ours.
 	KillSwitch bool
+	// PinHosts are /32 routes via the physical gateway (DNS, control, nodes)
+	// so bypass sockets stay reachable after the split default route moves.
+	PinHosts []net.IP
 	// Device replaces the OS TUN device and skips OS configuration (tests).
 	Device tun.Device
-	Log    *slog.Logger
+	// OnUp is called once the device is configured (and the kill switch, if
+	// any, is in force) and packets are about to flow.
+	OnUp func()
+	Log  *slog.Logger
 }
 
 const (
@@ -111,13 +117,24 @@ func Run(ctx context.Context, cfg Config) (err error) {
 			_ = dev.Close()
 			return err
 		}
-		restore, err := configure(sysConfig{Name: name, MTU: cfg.MTU, Phys: cfg.Bypass.Iface, KillSwitch: cfg.KillSwitch, Log: cfg.Log})
+		var gw net.IP
+		pins := append([]net.IP(nil), cfg.PinHosts...)
+		if cfg.Bypass != nil {
+			gw = cfg.Bypass.Gateway
+			if cfg.Bypass.DNSHost != nil {
+				pins = append(pins, cfg.Bypass.DNSHost)
+			}
+		}
+		restore, err := configure(sysConfig{
+			Name: name, MTU: cfg.MTU, Phys: cfg.Bypass.Iface, Gateway: gw, PinHosts: pins,
+			KillSwitch: cfg.KillSwitch, Log: cfg.Log,
+		})
 		defer restore()
 		if err != nil {
 			_ = dev.Close()
 			return fmt.Errorf("tun: configure %s: %w", name, err)
 		}
-		cfg.Log.Info("full tunnel up", "device", name, "kill_switch", cfg.KillSwitch)
+		cfg.Log.Info("full tunnel up", "device", name, "kill_switch", cfg.KillSwitch, "pinned_hosts", len(pins))
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -125,6 +142,9 @@ func Run(ctx context.Context, cfg Config) (err error) {
 	if err != nil {
 		_ = dev.Close()
 		return err
+	}
+	if cfg.OnUp != nil {
+		cfg.OnUp()
 	}
 	return e.run(cancel)
 }
