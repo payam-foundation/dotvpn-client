@@ -65,7 +65,7 @@ dotvpn connect && dotvpn status
 dotvpn disconnect
 ```
 
-Build the app (needs CGO; WebKitGTK on Linux, WebView2 on Windows):
+Build the app (needs CGO; GTK 4 + WebKitGTK 6 on Linux, WebView2 on Windows):
 
 ```sh
 cd desktop/frontend && pnpm install && pnpm build
