@@ -2,14 +2,18 @@
 
 Client library and CLI. Module `github.com/payam-foundation/dotvpn-client`, binary `dotvpn`. Depends on `dotvpn-wire` only.
 
-Contents: engine, fallback ladder, SOCKS5/HTTP proxy, TUN, fakedns, router, leak guards (Linux, macOS, Windows).
+Contents: engine, fallback ladder, SOCKS5/HTTP proxy, TUN, fakedns, router, leak guards (Linux, macOS, Windows), helper daemon (`internal/daemon`, `internal/helper`), IPC (`internal/ipc`), service install (`internal/service`), desktop GUI (`desktop/`, own module).
 
 ## Commands
 
 ```sh
 go build ./... && go vet ./...
 go test -race -count=1 ./...
+cd desktop/frontend && pnpm install && pnpm build && pnpm test && pnpm e2e
+cd desktop && CGO_ENABLED=1 GOWORK=off go build ./... && GOWORK=off go test ./...
 ```
+
+`desktop/` is a nested module because it needs CGO. It imports only `internal/ipc` types and never engine code, so the `dotvpn` binary stays CGO-free.
 
 `go.mod` pins an exact `dotvpn-wire` tag and has no `replace`. For side-by-side work use an untracked `go.work` in the parent directory (see CONTRIBUTING.md). CI tests the pinned wire tag and wire `main`.
 
@@ -19,7 +23,9 @@ go test -race -count=1 ./...
 - Client sockets are pinned to the physical interface (`SO_MARK`/bind) so the tunnel cannot capture itself.
 - Local proxies bind loopback only (`loopback.Check`).
 - TLS pins use `VerifyConnection`. No new `InsecureSkipVerify` unless pinned or loopback-only.
-- `dotvpn -unblock` must always be able to remove the firewall rules after a crash.
+- `dotvpn -unblock` must always be able to remove the firewall rules after a crash. The helper also runs it on start when no session is active.
+- The GUI is unprivileged and never receives tokens or account keys. IPC is restricted to the installing user.
+- UI follows `../design`: lime `#C6F432` only for the connected state, never on buttons or toggles.
 
 ## Shared rules
 
@@ -30,7 +36,7 @@ go test -race -count=1 ./...
 
 ## Docs
 
-`docs/adr/`: ADR-009. Security report: `../dotvpn-lab/docs/REPORT.md`.
+`docs/adr/`: ADR-009, ADR-010 (GUI and helper). Security report: `../dotvpn-lab/docs/REPORT.md`.
 
 ## Flow
 
