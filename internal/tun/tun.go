@@ -295,22 +295,25 @@ func (e *engine) dialFlow(ctx context.Context, dst netip.AddrPort) (net.Conn, er
 	return e.cfg.Tunnel(ctx, "tcp", dst.String())
 }
 
-func (e *engine) onUDP(r *udp.ForwarderRequest) {
+// onUDP returns whether the request was handled. false lets the stack send
+// ICMP port unreachable (gVisor ForwarderHandler contract).
+func (e *engine) onUDP(r *udp.ForwarderRequest) bool {
 	dst := addrPort(r.ID())
 	if dst.Port() != 53 && e.cfg.Packet == nil {
-		return // dropped, see the package comment
+		return false // dropped, see the package comment
 	}
 	var wq waiter.Queue
 	ep, err := r.CreateEndpoint(&wq)
 	if err != nil {
-		return
+		return false
 	}
 	c := gonet.NewUDPConn(&wq, ep)
 	if dst.Port() == 53 {
 		go e.serveDNS(c)
-		return
+		return true
 	}
 	go e.serveUDP(c, dst)
+	return true
 }
 
 // udpIdle ends a flow with no datagram in either direction.
