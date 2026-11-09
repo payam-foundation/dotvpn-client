@@ -94,8 +94,66 @@ jobs:
           go vet ./...
           go build -trimpath -o /dev/null ./cmd/dotvpn
 
+  # The desktop app is its own module (CGO, webview), so the CGO-free dotvpn
+  # jobs above never see it. Built natively on each OS; the helper install and
+  # IPC tests run where the runner allows root (Linux, macOS).
+  desktop:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
+        with:
+          version: 10
+          package_json_file: desktop/frontend/package.json
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
+      - name: webkit headers
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+      - name: frontend
+        working-directory: desktop/frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm check
+          pnpm test
+          pnpm build
+      - name: screenshots
+        if: runner.os == 'Linux'
+        working-directory: desktop/frontend
+        run: |
+          pnpm exec playwright install --with-deps chromium
+          pnpm e2e
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: runner.os == 'Linux' && always()
+        with:
+          name: desktop-screens
+          path: desktop/frontend/e2e/shots
+      - env:
+          GOWORK: "off"
+        run: |
+          go generate ./...
+          go vet ./...
+          go test -race -count=1 ./...
+          go build -trimpath -o ${{ runner.temp }}/dotvpn-desktop${{ runner.os == 'Windows' && '.exe' || '' }} .
+
   release:
-    needs: [test, security, cross]
+    needs: [test, security, cross, desktop]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 30
