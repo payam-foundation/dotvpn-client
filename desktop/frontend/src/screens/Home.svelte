@@ -4,7 +4,6 @@
   import { flagEmoji } from "../lib/flag";
   import { formatLatency } from "../lib/format";
   import { t } from "../lib/i18n";
-  import { lookupIP, type IPMeta } from "../lib/ipmeta";
   import { groupNodes } from "../lib/nodes";
   import ConnectButton from "../components/ConnectButton.svelte";
   import Hop from "../components/Hop.svelte";
@@ -29,15 +28,9 @@
     // Never fall back to the direct public IP while "connected" — that is how
     // proxy-only sessions looked like a working VPN with the real address.
     if (connected && routed) return st.exitIp || t(lang, "home.ipChecking");
-    if (connected) return "—";
+    if (connected) return "-";
     if (busy) return st.exitIp || t(lang, "home.ipChecking");
     return st.publicIp || t(lang, "home.ipChecking");
-  });
-  const ipRaw = $derived.by(() => {
-    if (connected && routed) return st.exitIp || "";
-    if (connected) return "";
-    if (busy) return st.exitIp || "";
-    return st.publicIp || "";
   });
   /** Full tunnel up = protected exit. Anything else showing a real IP is exposed. */
   const ipTone = $derived.by((): "safe" | "unsafe" | "warn" | "idle" => {
@@ -53,20 +46,6 @@
     return t(lang, "home.ipCheckingBadge");
   });
 
-  let ipMeta = $state<IPMeta | null>(null);
-  $effect(() => {
-    const ip = ipRaw;
-    ipMeta = null;
-    if (!ip) return;
-    let cancelled = false;
-    void lookupIP(ip).then((m) => {
-      if (!cancelled) ipMeta = m;
-    });
-    return () => {
-      cancelled = true;
-    };
-  });
-
   const nodes = $derived(groupNodes(app.servers));
   const selected = $derived.by(() => {
     const pin = app.settings.pin ?? "";
@@ -76,6 +55,7 @@
     }
     return nodes.find((n) => n.active) ?? nodes[0];
   });
+  // Country comes from the helper / signed list only — never look it up online.
   const flagCC = $derived(selected?.country || st.country || "");
 
   async function pick(id: string) {
@@ -130,12 +110,8 @@
       {/if}
     </div>
     <span class="small ip-addr">{ipValue}</span>
-    {#if ipMeta && (ipMeta.country || ipMeta.asn || ipMeta.org)}
-      <span class="caption muted ip-meta">
-        {#if ipMeta.countryCode}{flagEmoji(ipMeta.countryCode)} {/if}{ipMeta.country || ""}
-        {#if ipMeta.asn}{#if ipMeta.country} · {/if}{ipMeta.asn}{/if}
-        {#if ipMeta.org}{#if ipMeta.country || ipMeta.asn} · {/if}{ipMeta.org}{/if}
-      </span>
+    {#if flagCC && (connected || busy)}
+      <span class="caption muted ip-meta">{flagEmoji(flagCC)} {flagCC}</span>
     {/if}
   </div>
 
@@ -148,7 +124,7 @@
     <span class="meta mono muted">
       {#if selected?.latencyMs}{formatLatency(selected.latencyMs, lang)}
       {:else if !app.settings.pin}{t(lang, "servers.auto")}
-      {:else}—{/if}
+      {:else}-{/if}
     </span>
   </button>
 </section>
@@ -182,7 +158,7 @@
                 {#if n.active}<span class="caption live"><span class="dot" aria-hidden="true"></span>{t(lang, "servers.active")}</span>
                 {:else if n.country}<span class="caption muted">{n.country}</span>{/if}
               </span>
-              <span class="meta mono muted">{n.latencyMs ? formatLatency(n.latencyMs, lang) : "—"}</span>
+              <span class="meta mono muted">{n.latencyMs ? formatLatency(n.latencyMs, lang) : "-"}</span>
             </button>
           </li>
         {/each}
