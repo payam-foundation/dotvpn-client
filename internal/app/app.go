@@ -35,7 +35,9 @@ type Params struct {
 	Opts transport.Options
 	// HTTP is the control-plane client; nil means the default.
 	HTTP *http.Client
-	Log  *slog.Logger
+	// OnState is passed to the engine (see client.EngineConfig.OnState).
+	OnState func(client.Info)
+	Log     *slog.Logger
 }
 
 // NewEngine builds the engine. With an account and control channels it also
@@ -43,10 +45,21 @@ type Params struct {
 func NewEngine(ctx context.Context, p Params) (*client.Engine, error) {
 	c := p.Config
 	p.Opts.Fragment, p.Opts.Upstream = c.Fragment, c.UpstreamProxy
-	ecfg := client.EngineConfig{Endpoints: c.Endpoints, Dialers: Dialers(p.Opts), Log: p.Log}
+	ecfg := client.EngineConfig{Endpoints: c.Endpoints, Dialers: Dialers(p.Opts), OnState: p.OnState, Pin: c.Pin, Log: p.Log}
 	if c.UpstreamProxy != "" { // UDP carriers cannot ride a TCP proxy
 		delete(ecfg.Dialers, transport.KindH3)
 		delete(ecfg.Dialers, reverse.KindDNS)
+	}
+	if len(c.Carriers) > 0 {
+		allow := map[string]bool{}
+		for _, k := range c.Carriers {
+			allow[k] = true
+		}
+		for k := range ecfg.Dialers {
+			if !allow[string(k)] {
+				delete(ecfg.Dialers, k)
+			}
+		}
 	}
 	switch c.ProbeTarget {
 	case "":
@@ -70,7 +83,7 @@ func NewEngine(ctx context.Context, p Params) (*client.Engine, error) {
 		}
 		tm := &client.TokenManager{Log: p.Log, Source: &discovery.Client{
 			Channels: c.Control, Verifier: auth.NewVerifier(pubs...), AccountKey: c.Account,
-			CachePath: filepath.Join(p.Dir, "serverlist.cache"), Bootstrap: c.Bootstrap, HTTP: p.HTTP,
+			Relays: c.Relays, CachePath: filepath.Join(p.Dir, "serverlist.cache"), Bootstrap: c.Bootstrap, HTTP: p.HTTP,
 		}}
 		ecfg.Token, ecfg.OnUnauthorized = tm.Token, tm.Refresh
 		eng := client.NewEngine(ecfg)

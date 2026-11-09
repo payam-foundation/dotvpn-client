@@ -15,7 +15,11 @@ import (
 // Create it before Run, while the default route is still the physical one.
 type Bypass struct {
 	// Iface is the interface that held the default route.
-	Iface    *net.Interface
+	Iface *net.Interface
+	// Gateway is the physical default gateway at Bypass creation (may be nil).
+	Gateway net.IP
+	// DNSHost is the upstream resolver IP (no port).
+	DNSHost  net.IP
 	upstream string
 	resolver *net.Resolver
 	// protect, when set, replaces interface binding: it exempts each socket
@@ -47,7 +51,10 @@ func NewBypass(dns string) (*Bypass, error) {
 		addrs, _ := ifs[i].Addrs()
 		for _, a := range addrs {
 			if ipn, ok := a.(*net.IPNet); ok && ipn.IP.Equal(local) {
-				b := &Bypass{Iface: &ifs[i], upstream: dns}
+				b := &Bypass{Iface: &ifs[i], upstream: dns, Gateway: defaultGateway4()}
+				if host, _, err := net.SplitHostPort(dns); err == nil {
+					b.DNSHost = net.ParseIP(host)
+				}
 				b.resolver = &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
 					return b.dialer().DialContext(ctx, network, b.upstream)
 				}}

@@ -45,7 +45,7 @@ func ImportInvite(uri string) (string, error) {
 	c := &config.Config{}
 	c.Defaults()
 	c.Apply(i)
-	c.Tun.Enabled = true
+	c.Tun.SetEnabled(true)
 	b, err := config.Marshal(c)
 	return string(b), err
 }

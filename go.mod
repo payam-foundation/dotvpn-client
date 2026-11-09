@@ -47,7 +47,7 @@ require (
 	github.com/pion/webrtc/v4 v4.2.18 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
-	github.com/quic-go/quic-go v0.64.1 // indirect
+	github.com/quic-go/quic-go v0.65.0 // indirect
 	github.com/realclientip/realclientip-go v1.0.0 // indirect
 	github.com/refraction-networking/utls v1.8.2 // indirect
 	github.com/rogpeppe/go-internal v1.16.0 // indirect
@@ -74,8 +74,9 @@ require (
 )
 
 require (
+	github.com/Microsoft/go-winio v0.6.2
 	github.com/miekg/dns v1.1.73
-	github.com/payam-foundation/dotvpn-wire v0.2.1
+	github.com/payam-foundation/dotvpn-wire v0.3.0
 	golang.org/x/mobile v0.0.0-20261011034528-197770444867
 	golang.org/x/sys v0.49.0
 	golang.zx2c4.com/wireguard v0.0.0-20261024220952-b3bc704ef0ee

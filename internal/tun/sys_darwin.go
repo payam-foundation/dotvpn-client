@@ -66,6 +66,9 @@ func configure(c sysConfig) (restore func(), err error) {
 			return nil, err
 		}
 	}
+	if err = pinHostRoutes(&u, c); err != nil {
+		return nil, err
+	}
 	if err = darwinDNS(&u, c); err != nil {
 		return nil, err
 	}
@@ -75,6 +78,34 @@ func configure(c sysConfig) (restore func(), err error) {
 		}
 	}
 	return u.run, nil
+}
+
+// pinHostRoutes keeps control/DNS/node addresses on the physical gateway so
+// IP_BOUND_IF sockets stay reachable after the split default route moves to
+// the tunnel.
+func pinHostRoutes(u *undo, c sysConfig) error {
+	if c.Gateway == nil {
+		return nil
+	}
+	gw := c.Gateway.String()
+	seen := map[string]bool{}
+	for _, ip := range c.PinHosts {
+		if ip == nil || ip.IsUnspecified() || ip.IsLoopback() {
+			continue
+		}
+		host := ip.String()
+		if seen[host] {
+			continue
+		}
+		seen[host] = true
+		if err := u.step(c.Log,
+			[]string{"route", "-n", "delete", "-host", host, gw},
+			"route", "-n", "add", "-host", host, gw,
+		); err != nil {
+			c.Log.Warn("pin host route failed", "host", host, "gateway", gw, "err", err)
+		}
+	}
+	return nil
 }
 
 // darwinDNS points the network service of the physical interface at the fake

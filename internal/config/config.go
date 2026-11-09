@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"strings"
 
@@ -14,11 +15,18 @@ import (
 	"github.com/payam-foundation/dotvpn-wire/atomicfile"
 	"github.com/payam-foundation/dotvpn-wire/discovery"
 	"github.com/payam-foundation/dotvpn-wire/invite"
+	"github.com/payam-foundation/dotvpn-wire/loopback"
 	"github.com/payam-foundation/dotvpn-wire/transport"
 )
 
+// SchemaCurrent is the config migration watermark. Bump when changing defaults
+// that must rewrite existing files once.
+const SchemaCurrent = 3
+
 // Config is the client's YAML file.
 type Config struct {
+	// Schema tracks which defaults migrations have been applied.
+	Schema int `yaml:"schema,omitempty"`
 	// Listen is the local mixed SOCKS5 + HTTP proxy address. A non-loopback
 	// address needs ListenAuth or ListenAuthFile.
 	Listen string `yaml:"listen"`
@@ -46,14 +54,22 @@ type Config struct {
 	ProbeTarget string `yaml:"probe_target"`
 	// StateFile remembers the last working endpoint (default state.json beside
 	// the config). "off" disables persistence.
-	StateFile string        `yaml:"state_file"`
-	Tun       TunConfig     `yaml:"tun"`
-	Routing   RoutingConfig `yaml:"routing"`
+	StateFile string `yaml:"state_file"`
+	// Pin is a client.Health.ID: connect through that endpoint only.
+	Pin string `yaml:"pin,omitempty"`
+	// Relays are opted-in private/community relay ids sent on token refresh.
+	Relays []string `yaml:"relays,omitempty"`
+	// Carriers lists enabled transport kinds; empty means Auto (all).
+	Carriers []string `yaml:"carriers,omitempty"`
+	Tun      TunConfig     `yaml:"tun"`
+	Routing  RoutingConfig `yaml:"routing"`
 }
 
 // TunConfig configures full-tunnel mode.
 type TunConfig struct {
-	Enabled bool   `yaml:"enabled"`
+	// Enabled is full-tunnel mode. Omitted defaults to true (product default);
+	// false is local proxy only. KillSwitch forces the tunnel on.
+	Enabled *bool  `yaml:"enabled,omitempty"`
 	Name    string `yaml:"name"`
 	MTU     int    `yaml:"mtu"`
 	// KillSwitch blocks all non-tunnel traffic if the tunnel drops.
@@ -61,6 +77,77 @@ type TunConfig struct {
 	// DNS is the upstream resolver ("ip:port", default 1.1.1.1:53) the client
 	// itself uses for node and control hostnames, outside the tunnel.
 	DNS string `yaml:"dns"`
+	// DNSPreset is system|cloudflare|google|quad9|custom.
+	DNSPreset string `yaml:"dns_preset,omitempty"`
+	// DoH uses DNS-over-HTTPS for bypass/ECH lookups when supported.
+	DoH bool `yaml:"doh,omitempty"`
+}
+
+// TunnelOn is whether Connect should bring up the system tunnel.
+func (t TunConfig) TunnelOn() bool {
+	if t.KillSwitch {
+		return true
+	}
+	if t.Enabled == nil {
+		return true
+	}
+	return *t.Enabled
+}
+
+// Migrate rewrites legacy defaults in place. Returns whether the caller should
+// persist the config.
+func (c *Config) Migrate() bool {
+	if c.Schema >= SchemaCurrent {
+		return false
+	}
+	orig := c.Schema
+	// Schema 0→1: older builds wrote enabled:false (Go zero / buggy Settings)
+	// even with dns_preset set, which left Connect in proxy-only mode and the
+	// UI showing the real public IP. Product default is full tunnel; users who
+	// want SOCKS-only can turn "Route all traffic" off after this lands.
+	if orig < 1 {
+		if c.Tun.Enabled == nil || !*c.Tun.Enabled {
+			c.Tun.SetEnabled(true)
+		}
+		if c.Tun.DNSPreset == "" {
+			c.Tun.DNSPreset = "cloudflare"
+		}
+	}
+	// Schema 1→2: dns_preset "system" was persisted as the literal DNS address
+	// "system", which cannot be dialed ("missing port in address").
+	if orig < 2 && (c.Tun.DNS == "system" || c.Tun.DNSPreset == "system") {
+		c.Tun.DNSPreset = "system"
+		c.Tun.DNS = ""
+	}
+	// Schema 2→3: "system" as the bypass resolver races with the tunnel's
+	// fake DNS (198.18.0.2) and often becomes unreachable; use Cloudflare
+	// for the client's own physical-path lookups. Users can still pick
+	// system in Settings afterward.
+	if c.Tun.DNSPreset == "system" || c.Tun.DNS == "" || c.Tun.DNS == "system" || isFakeTunDNS(c.Tun.DNS) {
+		c.Tun.DNSPreset = "cloudflare"
+		c.Tun.DNS = "1.1.1.1:53"
+	}
+	c.Schema = SchemaCurrent
+	return true
+}
+
+// isFakeTunDNS reports the reserved fakedns/CGNAT range we point the OS at.
+func isFakeTunDNS(addr string) bool {
+	host := addr
+	if h, _, err := net.SplitHostPort(addr); err == nil {
+		host = h
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return host == "system"
+	}
+	_, cidr, err := net.ParseCIDR("198.18.0.0/15")
+	return err == nil && cidr.Contains(ip)
+}
+
+// SetEnabled stores the full-tunnel preference.
+func (t *TunConfig) SetEnabled(on bool) {
+	t.Enabled = &on
 }
 
 // RoutingConfig lists destinations that bypass the tunnel.
@@ -128,6 +215,9 @@ func (c *Config) Apply(i invite.Invite) {
 	if i.Bootstrap != "" {
 		c.Bootstrap = i.Bootstrap
 	}
+	// Joining a network turns the system tunnel on. Proxy-only stays a
+	// deliberate Settings choice after schema migration.
+	c.Tun.SetEnabled(true)
 }
 
 // Load reads path and applies defaults; unknown keys are an error.
@@ -166,4 +256,20 @@ func Save(path string, c *Config) error {
 		return err
 	}
 	return atomicfile.Write(path, b, 0o700)
+}
+
+// CheckListen refuses a proxy address reachable off-host unless proxy
+// authentication is configured. A unix socket is never valid (TCP listener).
+func (c *Config) CheckListen() error {
+	_, _, authed, err := c.ProxyAuth()
+	if err != nil {
+		return err
+	}
+	if strings.HasPrefix(c.Listen, "unix:") {
+		return fmt.Errorf("listen %q: local proxy needs a TCP address", c.Listen)
+	}
+	if loopback.Check(c.Listen) != nil && !authed {
+		return fmt.Errorf("listen %q: a non-loopback proxy needs listen_auth or listen_auth_file", c.Listen)
+	}
+	return nil
 }

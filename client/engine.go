@@ -3,7 +3,7 @@
 // DialContext to the local proxy and TUN fronts.
 //
 // Interface: NewEngine(Config) *Engine; Engine.DialContext; Engine.SetEndpoints;
-// Engine.Status. Probing, ranking, cooldowns, reconnects and token plumbing are
+// Engine.Status, Engine.Info, Engine.Health. Probing, ranking, cooldowns, reconnects and token plumbing are
 // hidden.
 package client
 
@@ -39,7 +39,14 @@ type EngineConfig struct {
 	// OnUnauthorized is called when a node rejects the token, so the token
 	// source can refresh. It must not block for long.
 	OnUnauthorized func()
-	Log            *slog.Logger
+	// OnState is called after the live session appears, drops or closes, with
+	// the new Info. It runs on the engine's goroutines and must not block.
+	OnState func(Info)
+	// Pin is a Health.ID: when it names a configured endpoint, only that
+	// endpoint is tried. An unknown ID is ignored, so a stale pin cannot
+	// leave the client with an empty ladder.
+	Pin string
+	Log *slog.Logger
 }
 
 // Engine multiplexes tunnels over one live session.
@@ -53,10 +60,15 @@ type Engine struct {
 	prefer   string
 	fast     bool // prefer came from the store and has not been tried yet
 	cooldown map[string]time.Time
+	fails    map[string]int
+	since    time.Time
+	health   map[string]epHealth
 
 	connMu sync.Mutex
 	closed bool
 }
+
+const maxCooldown = 30 * time.Minute
 
 // NewEngine builds an Engine; call Run to start the fallback ladder.
 func NewEngine(c EngineConfig) *Engine {
@@ -69,7 +81,10 @@ func NewEngine(c EngineConfig) *Engine {
 	if c.Log == nil {
 		c.Log = slog.Default()
 	}
-	e := &Engine{cfg: c, eps: c.Endpoints, cooldown: map[string]time.Time{}}
+	e := &Engine{
+		cfg: c, eps: c.Endpoints,
+		cooldown: map[string]time.Time{}, fails: map[string]int{}, health: map[string]epHealth{},
+	}
 	if c.Store != nil {
 		if st := c.Store.Load(); st.Key != "" {
 			e.prefer, e.fast = st.Key, true
@@ -103,10 +118,12 @@ func (e *Engine) Close() error {
 	s := e.sess
 	e.sess = nil
 	e.mu.Unlock()
-	if s != nil {
-		return s.Close()
+	if s == nil {
+		return nil
 	}
-	return nil
+	err := s.Close()
+	e.notify()
+	return err
 }
 
 // DialContext opens a tunnelled connection to addr ("host:port"). Only tcp is
@@ -191,14 +208,20 @@ func (e *Engine) DialPacket(ctx context.Context, addr string) (net.Conn, error) 
 }
 
 func (e *Engine) drop(s transport.Session) {
+	dropped := false
 	e.mu.Lock()
 	if e.sess == s {
 		e.sess = nil
-		e.cooldown[key(e.cur)] = time.Now().Add(e.cfg.Cooldown)
+		e.markCoolLocked(key(e.cur))
 		e.cfg.Log.Warn("carrier failed", "endpoint", e.cur.Label())
+		dropped = true
 	}
 	e.mu.Unlock()
 	_ = s.Close()
+	if dropped {
+		e.persistCool()
+		e.notify()
+	}
 }
 
 func (e *Engine) session(ctx context.Context) (transport.Session, error) {
@@ -221,14 +244,13 @@ func (e *Engine) session(ctx context.Context) (transport.Session, error) {
 		return nil, err
 	}
 	e.mu.Lock()
-	e.sess, e.cur, e.prefer = s, ep, key(ep)
+	e.sess, e.cur, e.prefer, e.since = s, ep, key(ep), time.Now()
+	delete(e.fails, key(ep))
+	delete(e.cooldown, key(ep))
 	e.mu.Unlock()
 	e.cfg.Log.Info("connected", "endpoint", ep.Label())
-	if e.cfg.Store != nil {
-		if err := e.cfg.Store.Save(State{Key: key(ep), Addr: ep.Addr, At: time.Now()}); err != nil {
-			e.cfg.Log.Debug("state not saved", "err", err)
-		}
-	}
+	e.notify()
+	e.persistCool()
 	return s, nil
 }
 
@@ -243,6 +265,44 @@ func (e *Engine) live() transport.Session {
 
 func key(ep transport.Endpoint) string {
 	return string(ep.Kind) + "|" + ep.Addr + "|" + ep.Host + "|" + ep.Path
+}
+
+// markCoolLocked grows the cool-down for a failed endpoint. Caller holds e.mu.
+func (e *Engine) markCoolLocked(k string) {
+	n := e.fails[k] + 1
+	e.fails[k] = n
+	d := e.cfg.Cooldown
+	for i := 1; i < n; i++ {
+		if d >= maxCooldown/2 {
+			d = maxCooldown
+			break
+		}
+		d *= 2
+	}
+	if d > maxCooldown {
+		d = maxCooldown
+	}
+	e.cooldown[k] = time.Now().Add(d)
+}
+
+// persistCool writes the preferred endpoint to the StateStore (not cool-downs).
+func (e *Engine) persistCool() {
+	if e.cfg.Store == nil {
+		return
+	}
+	e.mu.Lock()
+	st := State{Key: e.prefer, At: time.Now()}
+	if e.sess != nil {
+		st.Key = key(e.cur)
+		st.Addr = e.cur.Addr
+	}
+	e.mu.Unlock()
+	if st.Key == "" {
+		return
+	}
+	if err := e.cfg.Store.Save(st); err != nil {
+		e.cfg.Log.Debug("state not saved", "err", err)
+	}
 }
 
 // expand replaces endpoints that carry Params["ips"] with one endpoint per
@@ -292,10 +352,22 @@ func (e *Engine) ladder() []transport.Endpoint {
 }
 
 func (e *Engine) arrange(eps []transport.Endpoint) []transport.Endpoint {
+	return e.order(eps, true)
+}
+
+// order ranks endpoints. When skipCool is true (dial path), cool endpoints are
+// omitted while any non-cool alternative exists so a blocked carrier/domain is
+// not retried until its cool-down ends (or everything else failed).
+func (e *Engine) order(eps []transport.Endpoint, skipCool bool) []transport.Endpoint {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	now := time.Now()
-	var first, mid, last []transport.Endpoint
+	if e.cfg.Pin != "" {
+		if p := pinned(eps, e.cfg.Pin); len(p) > 0 {
+			eps = p
+		}
+	}
+	var first, mid, cool []transport.Endpoint
 	for _, ep := range eps {
 		if _, ok := e.cfg.Dialers[ep.Kind]; !ok {
 			continue
@@ -304,12 +376,16 @@ func (e *Engine) arrange(eps []transport.Endpoint) []transport.Endpoint {
 		case k == e.prefer && now.After(e.cooldown[k]):
 			first = append(first, ep)
 		case now.Before(e.cooldown[k]):
-			last = append(last, ep)
+			cool = append(cool, ep)
 		default:
 			mid = append(mid, ep)
 		}
 	}
-	return append(append(first, mid...), last...)
+	out := append(first, mid...)
+	if !skipCool || len(out) == 0 {
+		out = append(out, cool...)
+	}
+	return out
 }
 
 // fastPath tries the endpoint remembered from the last run on its own, before
@@ -338,6 +414,15 @@ const fastPathBudget = 6 * time.Second
 // dialVerified dials ep and, when ProbeTarget is set, proves the data plane
 // before reporting success.
 func (e *Engine) dialVerified(ctx context.Context, ep transport.Endpoint) (transport.Session, error) {
+	start := time.Now()
+	s, err := e.dialProbed(ctx, ep)
+	if ctx.Err() == nil || err == nil { // a rung cancelled by the race winner says nothing about its health
+		e.record(ep, time.Since(start), err)
+	}
+	return s, err
+}
+
+func (e *Engine) dialProbed(ctx context.Context, ep transport.Endpoint) (transport.Session, error) {
 	d, ok := e.cfg.Dialers[ep.Kind]
 	if !ok {
 		return nil, fmt.Errorf("no dialer for %q", ep.Kind)
@@ -415,8 +500,9 @@ func (e *Engine) race(ctx context.Context) (transport.Session, transport.Endpoin
 			}
 			e.cfg.Log.Debug("endpoint failed", "endpoint", r.ep.Label(), "err", r.err)
 			e.mu.Lock()
-			e.cooldown[key(r.ep)] = time.Now().Add(e.cfg.Cooldown)
+			e.markCoolLocked(key(r.ep))
 			e.mu.Unlock()
+			e.persistCool()
 			errs = append(errs, fmt.Errorf("%s: %w", r.ep.Label(), r.err))
 			if received == len(order) {
 				return nil, transport.Endpoint{}, fmt.Errorf("client: all endpoints failed: %w", errors.Join(errs...))

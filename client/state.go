@@ -12,7 +12,8 @@ import (
 
 // State is what survives a restart: which endpoint worked last. It holds no
 // secrets, only a routing hint, so a stolen file reveals a node address the
-// config already names.
+// config already names. Failure cool-downs stay in memory for one session so a
+// manual Connect is not blocked by yesterday's outage.
 type State struct {
 	// Key identifies the endpoint (Kind, Addr, Host, Path); Addr is the exact
 	// dialled address, which for a clean-IP endpoint is the chosen IP.

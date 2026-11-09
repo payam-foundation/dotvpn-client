@@ -1,0 +1,9 @@
+frontend/node_modules/
+frontend/dist/*
+!frontend/dist/.keep
+frontend/dist-mock/
+frontend/e2e/out/
+frontend/test-results/
+frontend/e2e/shots/
+helper/*
+!helper/.keep
