@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/payam-foundation/dotvpn-client/compare/v0.2.0...v0.3.0) (2026-11-09)
+
+
+### Features
+
+* ship desktop GUI over a privileged helper ([#14](https://github.com/payam-foundation/dotvpn-client/issues/14)) ([25f5eb9](https://github.com/payam-foundation/dotvpn-client/commit/25f5eb9579d482ba690f81dbf5f45821a14092c8))
+
+
+### Bug Fixes
+
+* **tun:** adapt UDP forwarder to gVisor handled-bool API ([#16](https://github.com/payam-foundation/dotvpn-client/issues/16)) ([fe95ffa](https://github.com/payam-foundation/dotvpn-client/commit/fe95ffadc9331b0139efaf35414b227f7a5ab5fa))
+
 ## [0.2.0](https://github.com/payam-foundation/dotvpn-client/compare/v0.1.0...v0.2.0) (2026-11-07)
 
 
