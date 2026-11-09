@@ -4,34 +4,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/payam-foundation/dotvpn-client/internal/config"
+	"github.com/payam-foundation/dotvpn-client/internal/ipc"
 )
-
-// Off-host binds are only allowed with proxy authentication.
-func TestCheckListen(t *testing.T) {
-	for _, tc := range []struct {
-		name, listen, auth string
-		ok                 bool
-	}{
-		{"loopback no auth", "127.0.0.1:1080", "", true},
-		{"loopback v6", "[::1]:1080", "", true},
-		{"loopback with auth", "127.0.0.1:1080", "u:p", true},
-		{"any no auth", "0.0.0.0:1080", "", false},
-		{"empty host no auth", ":1080", "", false},
-		{"lan no auth", "192.168.1.5:1080", "", false},
-		{"lan with auth", "192.168.1.5:1080", "u:p", true},
-		{"any with auth", "0.0.0.0:1080", "u:p", true},
-		{"unix refused", "unix:/tmp/x", "u:p", false},
-		{"malformed auth", "0.0.0.0:1080", "nopass", false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			err := checkListen(&config.Config{Listen: tc.listen, ListenAuth: tc.auth})
-			if (err == nil) != tc.ok {
-				t.Fatalf("err = %v, want ok=%v", err, tc.ok)
-			}
-		})
-	}
-}
 
 func TestConnectedLine(t *testing.T) {
 	if got, want := connectedLine("h3", false), "connected via h3"; got != want {
@@ -61,5 +35,15 @@ func TestUseColor(t *testing.T) {
 	}
 	if useColor(tty, "1") {
 		t.Fatal("NO_COLOR must disable colour")
+	}
+}
+
+func TestStatusLine(t *testing.T) {
+	st := ipc.Status{State: ipc.StateConnected, Carrier: "h3", Server: "fra", LatencyMS: 42, FullTunnel: true, KillSwitch: true}
+	if got, want := statusLine(st), "connected  via h3  fra  42ms  full tunnel  kill switch"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	if got := statusLine(ipc.Status{State: ipc.StateOff}); got != "off" {
+		t.Fatalf("got %q", got)
 	}
 }

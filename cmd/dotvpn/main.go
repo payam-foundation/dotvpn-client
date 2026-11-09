@@ -7,24 +7,17 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
-	"net"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"syscall"
-	"time"
 
-	"github.com/payam-foundation/dotvpn-client/client"
-	"github.com/payam-foundation/dotvpn-client/internal/app"
 	"github.com/payam-foundation/dotvpn-client/internal/config"
-	"github.com/payam-foundation/dotvpn-client/internal/router"
+	"github.com/payam-foundation/dotvpn-client/internal/daemon"
+	"github.com/payam-foundation/dotvpn-client/internal/ipc"
 	"github.com/payam-foundation/dotvpn-client/internal/tun"
 	"github.com/payam-foundation/dotvpn-wire/invite"
-	"github.com/payam-foundation/dotvpn-wire/loopback"
-	"github.com/payam-foundation/dotvpn-wire/transport"
 )
 
 var version = "dev"
@@ -46,6 +39,9 @@ func run(ctx context.Context, args []string) error {
 	if len(args) > 0 && args[0] == "version" {
 		fmt.Println(version)
 		return nil
+	}
+	if ok, err := subcommand(ctx, args); ok {
+		return err
 	}
 	fs := flag.NewFlagSet("dotvpn", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -92,89 +88,31 @@ func run(ctx context.Context, args []string) error {
 	if *listen != "" {
 		c.Listen = *listen
 	}
-	if err := checkListen(c); err != nil {
+	if err := c.CheckListen(); err != nil {
 		return err
 	}
-	c.Tun.Enabled = c.Tun.Enabled || *full || *ks
+	c.Tun.SetEnabled(c.Tun.TunnelOn() || *full || *ks)
 	c.Tun.KillSwitch = c.Tun.KillSwitch || *ks
 	return serve(ctx, c, path, log)
 }
 
-// checkListen refuses a proxy address reachable off-host unless proxy
-// authentication is configured. A unix socket is never valid (TCP listener).
-func checkListen(c *config.Config) error {
-	_, _, authed, err := c.ProxyAuth()
-	if err != nil {
-		return err
-	}
-	if strings.HasPrefix(c.Listen, "unix:") {
-		return fmt.Errorf("listen %q: local proxy needs a TCP address", c.Listen)
-	}
-	if loopback.Check(c.Listen) != nil && !authed {
-		return fmt.Errorf("listen %q: a non-loopback proxy needs listen_auth or listen_auth_file", c.Listen)
-	}
-	return nil
-}
-
 func serve(ctx context.Context, c *config.Config, path string, log *slog.Logger) error {
-	var opts transport.Options
-	var bypass *tun.Bypass
-	var ctl *http.Client
-	if c.Tun.Enabled {
-		// Must exist before the tunnel takes the default route: every socket
-		// the client opens itself is pinned to the physical interface.
-		var err error
-		if bypass, err = tun.NewBypass(c.Tun.DNS); err != nil {
-			return err
-		}
-		opts.Control, opts.Resolver, opts.DNS = bypass.Control, bypass.Resolver(), c.Tun.DNS
-		ctl = &http.Client{Timeout: 15 * time.Second, Transport: &http.Transport{
-			DialContext: bypass.DialContext, Proxy: nil, ForceAttemptHTTP2: true,
-			TLSHandshakeTimeout: 10 * time.Second,
-		}}
-	}
-	eng, err := app.NewEngine(ctx, app.Params{Config: c, Dir: filepath.Dir(path), Opts: opts, HTTP: ctl, Log: log})
-	if err != nil {
-		return err
-	}
-	defer eng.Close()
-
-	ln, err := net.Listen("tcp", c.Listen)
-	if err != nil {
-		return err
-	}
-	log.Info("local proxy ready (SOCKS5 and HTTP)", "addr", ln.Addr().String())
-	ctx, cancel := context.WithCancel(ctx)
+	sess := daemon.New(log)
+	ev, cancel := sess.Subscribe()
 	defer cancel()
-	errc := make(chan error, 2)
-	lp := &client.LocalProxy{Dial: eng.DialContext, Log: log}
-	if u, p, ok, _ := c.ProxyAuth(); ok { // validated by checkListen
-		lp.Auth = client.StaticAuth(u, p)
+	if err := sess.Start(daemon.Options{Config: c, Dir: filepath.Dir(path)}); err != nil {
+		return err
 	}
-	go func() { errc <- lp.Serve(ctx, ln) }()
-	go announce(ctx, eng, useColor(os.Stdout, os.Getenv("NO_COLOR")))
-	if bypass != nil {
-		rt, err := router.New(router.Config{
-			DirectDomains: c.Routing.DirectDomains, DirectCIDRs: c.Routing.DirectCIDRs,
-			GeoIP: c.Routing.GeoIP, GeoSite: c.Routing.GeoSite,
-			DirectGeoIP: c.Routing.DirectGeoIP, DirectGeoSite: c.Routing.DirectGeoSite,
-		})
-		if err != nil {
-			return err
-		}
-		go func() {
-			errc <- tun.Run(ctx, tun.Config{
-				Name: c.Tun.Name, MTU: c.Tun.MTU, Tunnel: eng.DialContext, Packet: eng.DialPacket,
-				Bypass: bypass, Router: rt, KillSwitch: c.Tun.KillSwitch, Log: log,
-			})
-		}()
+	go announce(ev, useColor(os.Stdout, os.Getenv("NO_COLOR")))
+	done := make(chan error, 1)
+	go func() { done <- sess.Wait() }()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		sess.Stop() // restores routes, DNS and firewall before we exit
+		return nil
 	}
-	err = <-errc
-	cancel()
-	if bypass != nil {
-		<-errc // let the tunnel restore routes, DNS and firewall before exiting
-	}
-	return err
 }
 
 func configPath(flagVal string) string {
@@ -196,21 +134,18 @@ func configPath(flagVal string) string {
 
 // announce prints "connected via <carrier>" on stdout each time the active
 // carrier changes, so a person at a terminal sees the state without log noise.
-func announce(ctx context.Context, eng *client.Engine, color bool) {
+func announce(ev <-chan ipc.Status, color bool) {
 	last := ""
-	t := time.NewTicker(time.Second)
-	defer t.Stop()
-	for {
-		if cur := eng.Status(); cur != last {
+	for st := range ev {
+		cur := ""
+		if st.State == ipc.StateConnected {
+			cur = st.Carrier
+		}
+		if cur != last {
 			last = cur
 			if cur != "" {
 				fmt.Println(connectedLine(cur, color))
 			}
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
 		}
 	}
 }
