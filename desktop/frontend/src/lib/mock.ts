@@ -137,6 +137,7 @@ export const mockApi: Api = {
     settings = structuredClone(s);
   },
   unblock: async () => {},
+  reportDiagnostics: async () => ({ issueUrl: "https://github.com/payam-foundation/dotvpn-client/issues/new", via: "browser" }),
   installHelper: async () => {
     await new Promise((r) => setTimeout(r, frozen ? 60_000 : 600));
     helper = true;

@@ -22,11 +22,41 @@ import (
 	"github.com/payam-foundation/dotvpn-client/client"
 	"github.com/payam-foundation/dotvpn-client/internal/app"
 	"github.com/payam-foundation/dotvpn-client/internal/config"
+	"github.com/payam-foundation/dotvpn-client/internal/diag"
 	"github.com/payam-foundation/dotvpn-client/internal/router"
 	inttun "github.com/payam-foundation/dotvpn-client/internal/tun"
 	"github.com/payam-foundation/dotvpn-wire/invite"
 	"github.com/payam-foundation/dotvpn-wire/transport"
 )
+
+// AppVersion is set by the Android shell / gomobile build.
+var AppVersion = "dev"
+
+var mobileRing = diag.NewRing("android", AppVersion)
+
+// SetAppVersion records the shell version for diagnostics bundles.
+func SetAppVersion(v string) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return
+	}
+	AppVersion = v
+	mobileRing.SetVersion(v)
+}
+
+// NormalizeConfig runs defaults/migrations (mints device_id) and returns YAML.
+func NormalizeConfig(cfg string) (string, error) {
+	c, err := config.Parse([]byte(cfg))
+	if err != nil {
+		return "", err
+	}
+	_ = c.Migrate()
+	b, err := config.Marshal(c)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
 
 // Protector exempts a socket from the VPN (VpnService.protect). Every socket
 // the client opens itself goes through it first, or it would loop into the
@@ -110,12 +140,14 @@ func start(cfg, dataDir string, dev tun.Device, p Protector) error {
 	if err != nil {
 		return fmt.Errorf("mobile: config: %w", err)
 	}
+	_ = c.Migrate() // mint device_id; Android should persist via NormalizeConfig
 	// Warn and above only: logcat is readable by other tools on rooted or
 	// debug devices, and Info lines name endpoints.
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	if c.Tun.KillSwitch {
-		log.Warn("kill_switch ignored on mobile; use Always-on VPN with 'Block connections without VPN'")
+		log.Warn("guard ignored on mobile; use system Always-on block")
 	}
+	mobileRing.Note(diag.Event{Code: diag.CodeStart})
 	bypass := inttun.NewProtectedBypass(c.Tun.DNS, p.Protect)
 	opts := transport.Options{Control: bypass.Control, Resolver: bypass.Resolver(), DNS: c.Tun.DNS}
 	ctl := &http.Client{Timeout: 15 * time.Second, Transport: &http.Transport{
@@ -168,7 +200,11 @@ func keepConnected(ctx context.Context, eng *client.Engine) {
 	for ctx.Err() == nil {
 		wait := 2 * time.Second
 		if err := eng.Connect(ctx); err != nil {
+			mobileRing.Note(diag.Event{Code: diag.CodeConnectFail, Detail: "retry"})
 			wait = 5 * time.Second
+		} else {
+			info := eng.Info()
+			mobileRing.Note(diag.Event{Code: diag.CodeConnectOK, EndpointID: client.EndpointID(info.Endpoint)})
 		}
 		select {
 		case <-ctx.Done():
@@ -185,6 +221,7 @@ func Stop() {
 	if s == nil {
 		return
 	}
+	mobileRing.Note(diag.Event{Code: diag.CodeStop})
 	s.cancel()
 	<-s.done
 }
@@ -199,4 +236,40 @@ func Status() string {
 		}
 	}
 	return status
+}
+
+// ReportDiagnostics submits a scrubbed bundle to controlURL with accountKey
+// (from the invite config). Returns "url|via" for the Android UI.
+func ReportDiagnostics(cfgYAML, controlURL, accountKey string) (string, error) {
+	mobileRing.SetVersion(AppVersion)
+	mobileRing.SetState(coarseState(Status()))
+	b := mobileRing.Snapshot()
+	if controlURL == "" || accountKey == "" {
+		if c, err := config.Parse([]byte(cfgYAML)); err == nil {
+			accountKey = c.Account
+			if len(c.Control) > 0 {
+				controlURL = c.Control[0].URL
+			}
+		}
+	}
+	sub := &diag.ClientSubmit{ControlURL: controlURL, AccountKey: accountKey}
+	res, err := sub.Submit(context.Background(), b)
+	if err != nil {
+		return "", err
+	}
+	return res.IssueURL + "|" + res.Via, nil
+}
+
+// coarseState strips carrier names and error text from Status() for L0.
+func coarseState(s string) string {
+	switch {
+	case s == "off" || s == "connecting":
+		return s
+	case strings.HasPrefix(s, "connected"):
+		return "connected"
+	case strings.HasPrefix(s, "error:"):
+		return "error"
+	default:
+		return "unknown"
+	}
 }

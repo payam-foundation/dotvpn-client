@@ -79,7 +79,10 @@ func (f *fake) Account() (Account, error) {
 func (f *fake) Relays() ([]Relay, error) { return []Relay{{ID: "r1", Name: "relay", Tier: "curated", Health: "ok"}}, nil }
 func (f *fake) AddRelay(string) error    { return nil }
 func (f *fake) RemoveRelay(string) error { return nil }
-func (f *fake) Logout() error            { f.imported = ""; f.set(Status{State: StateOff, Configured: false}); return nil }
+func (f *fake) Logout() error { f.imported = ""; f.set(Status{State: StateOff, Configured: false}); return nil }
+func (f *fake) ReportDiagnostics() (ReportResult, error) {
+	return ReportResult{IssueURL: "https://example.test/issues/1", Via: "browser"}, nil
+}
 
 func start(t *testing.T) (*Client, *fake) {
 	t.Helper()

@@ -16,9 +16,15 @@
   // Middle-truncated while idle so both ends stay visible; full text while editing.
   const shown = $derived(focused ? value : middleTruncate(value, 38));
 
+  /** Keep the first dotvpn:// + base64url run; drop TUI chrome around it. */
+  function extractInvite(raw: string): string {
+    const m = /dotvpn:\/\/[A-Za-z0-9_-]+/.exec(raw.replace(/[ \t\n\r]/g, ""));
+    return m?.[0] ?? raw.trim();
+  }
+
   async function paste() {
     try {
-      value = (await api.paste()).trim();
+      value = extractInvite(await api.paste());
     } catch {
       // No clipboard access: the field still takes ⌘V.
     }
@@ -26,9 +32,11 @@
 
   async function submit(e: Event) {
     e.preventDefault();
-    if (!value.trim() || busy) return;
+    const uri = extractInvite(value);
+    if (!uri || busy) return;
+    value = uri;
     busy = true;
-    const ok = await app.run(() => api.importInvite(value));
+    const ok = await app.run(() => api.importInvite(uri));
     busy = false;
     if (ok) {
       value = "";

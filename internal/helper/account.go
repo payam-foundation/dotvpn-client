@@ -14,7 +14,7 @@ import (
 
 // Account fetches the safe subscription view from the control plane.
 func (h *Helper) Account() (ipc.Account, error) {
-	base, key, err := h.controlCreds()
+	base, key, deviceID, err := h.controlCreds()
 	if err != nil {
 		return ipc.Account{}, err
 	}
@@ -23,6 +23,9 @@ func (h *Helper) Account() (ipc.Account, error) {
 		return ipc.Account{}, err
 	}
 	req.Header.Set("Authorization", "Bearer "+key)
+	if deviceID != "" {
+		req.Header.Set("X-Device-Id", deviceID)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return ipc.Account{}, err
@@ -45,26 +48,23 @@ func (h *Helper) Account() (ipc.Account, error) {
 		QuotaReset     string `json:"quota_reset"`
 		Expires        int64  `json:"expires"`
 		MaxDevices     int    `json:"max_devices"`
+		DevicesUsed    int    `json:"devices_used"`
 		Mbps           int    `json:"mbps"`
 		Disabled       bool   `json:"disabled"`
 	}
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return ipc.Account{}, err
 	}
-	used := 1 // this install counts as one seat until control reports live use
-	if v.MaxDevices > 0 && used > v.MaxDevices {
-		used = v.MaxDevices
-	}
 	return ipc.Account{
 		Name: v.Name, QuotaLimit: v.QuotaLimit, QuotaRemaining: v.QuotaRemaining,
 		QuotaReset: v.QuotaReset, Expires: v.Expires, MaxDevices: v.MaxDevices,
-		DevicesUsed: used, Mbps: v.Mbps, Disabled: v.Disabled,
+		DevicesUsed: v.DevicesUsed, Mbps: v.Mbps, Disabled: v.Disabled,
 	}, nil
 }
 
 // Relays lists curated public relays plus opted-in ids.
 func (h *Helper) Relays() ([]ipc.Relay, error) {
-	base, key, err := h.controlCreds()
+	base, key, _, err := h.controlCreds()
 	if err != nil {
 		return nil, err
 	}
@@ -175,15 +175,15 @@ func parseRelayID(s string) string {
 	return strings.TrimSpace(s)
 }
 
-func (h *Helper) controlCreds() (base, key string, err error) {
+func (h *Helper) controlCreds() (base, key, deviceID string, err error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	c, err := h.load()
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	if c.Account == "" || len(c.Control) == 0 || c.Control[0].URL == "" {
-		return "", "", ipc.Coded(ipc.CodeNotConfigured, fmt.Errorf("no control plane"))
+		return "", "", "", ipc.Coded(ipc.CodeNotConfigured, fmt.Errorf("no control plane"))
 	}
-	return c.Control[0].URL, c.Account, nil
+	return c.Control[0].URL, c.Account, c.DeviceID, nil
 }

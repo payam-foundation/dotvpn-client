@@ -178,6 +178,8 @@ jobs:
           args: release --clean --skip=validate
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Opt-in crash reporting DSN embedded via ldflags (internal/crash.DSN).
+          SENTRY_DSN_DESKTOP: ${{ secrets.SENTRY_DSN_DESKTOP }}
 
   # Runs the censorship lab (dotvpn-lab) against this PR. Needs a fine-grained
   # token with actions:write on dotvpn-lab in the LAB_DISPATCH_TOKEN secret;

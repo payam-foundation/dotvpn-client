@@ -22,6 +22,7 @@ const usage = `usage: dotvpn <command>
 
   connect | disconnect | status      drive the helper
   import <dotvpn://...>              save an invite in the helper
+  report                             send diagnostics (control or browser)
   service install|uninstall|status   manage the helper (needs root/Administrator to change)
   daemon                             run the helper (the service runs this)
   version
@@ -40,7 +41,7 @@ func subcommand(ctx context.Context, args []string) (bool, error) {
 		return true, daemonCmd(ctx, rest)
 	case "service":
 		return true, serviceCmd(rest)
-	case "status", "connect", "disconnect", "import":
+	case "status", "connect", "disconnect", "import", "report":
 		return true, clientCmd(ctx, args[0], rest)
 	case "help":
 		fmt.Print(usage)
@@ -76,6 +77,7 @@ func daemonCmd(ctx context.Context, args []string) error {
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: lvl}))
 	slog.SetDefault(log)
 	runHelper := func(ctx context.Context) error {
+		helper.AppVersion = version
 		ln, err := ipc.Listen(*addr, *owner)
 		if err != nil {
 			return err
@@ -171,6 +173,13 @@ func clientCmd(ctx context.Context, name string, args []string) error {
 			return errors.New("import: one dotvpn:// invite")
 		}
 		return helperErr(c.ImportInvite(ctx, args[0]))
+	case "report":
+		r, err := c.ReportDiagnostics(ctx)
+		if err != nil {
+			return helperErr(err)
+		}
+		fmt.Printf("%s (%s)\n", r.IssueURL, r.Via)
+		return nil
 	}
 	ev, err := c.Subscribe(ctx)
 	if err != nil {

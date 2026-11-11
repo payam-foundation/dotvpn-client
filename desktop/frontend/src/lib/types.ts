@@ -67,6 +67,12 @@ export interface Settings {
   carriers?: string[];
   directDomains: string[];
   directCidrs: string[];
+  crashReporting?: boolean;
+}
+
+export interface ReportResult {
+  issueUrl: string;
+  via: string;
 }
 
 export type Lang = "en" | "fa";
@@ -116,6 +122,7 @@ export const emptySettings: Settings = {
   carriers: [],
   directDomains: [],
   directCidrs: [],
+  crashReporting: false,
 };
 
 export const emptyAccount: Account = {

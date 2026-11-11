@@ -57,7 +57,7 @@ for (const theme of ["light", "dark"] as const) {
       await expect(page.getByRole("heading", { name: "Connected" })).toBeVisible();
       await expect(page.getByRole("switch", { name: "Disconnect" })).toBeVisible();
       await expect(page.getByText("Frankfurt")).toBeVisible();
-      await expect(page.getByText("Exit IP")).toBeVisible();
+      await expect(page.getByText("IP", { exact: true })).toBeVisible();
       await expect(page.getByText("203.0.113.10")).toBeVisible();
       await expect(page.getByText("Safe", { exact: true })).toBeVisible();
       expect(await limePixels(page)).toBeGreaterThan(20);

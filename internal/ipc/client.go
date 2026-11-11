@@ -138,6 +138,12 @@ func (c *Client) RemoveRelay(ctx context.Context, id string) error {
 	return c.call(ctx, MethodRemoveRelay, id, nil)
 }
 
+// ReportDiagnostics submits a scrubbed support bundle via the helper.
+func (c *Client) ReportDiagnostics(ctx context.Context) (r ReportResult, err error) {
+	err = c.call(ctx, MethodReport, nil, &r)
+	return
+}
+
 // Logout clears the saved invite/account and stops any session.
 func (c *Client) Logout(ctx context.Context) error {
 	return c.call(ctx, MethodLogout, nil, nil)

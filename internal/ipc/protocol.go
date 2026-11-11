@@ -23,6 +23,7 @@ const (
 	MethodAddRelay    = "AddRelay"
 	MethodRemoveRelay = "RemoveRelay"
 	MethodLogout      = "Logout"
+	MethodReport      = "ReportDiagnostics"
 )
 
 // maxLine bounds one request or response; an invite is a few KB.
@@ -93,4 +94,6 @@ type Backend interface {
 	RemoveRelay(id string) error
 	// Logout clears the invite/account from this device and stops any session.
 	Logout() error
+	// ReportDiagnostics submits a scrubbed support bundle (control or browser).
+	ReportDiagnostics() (ReportResult, error)
 }

@@ -1,5 +1,5 @@
 import { Call, Clipboard, Events } from "@wailsio/runtime";
-import type { Account, AppError, Info, InviteResult, Prefs, Relay, Server, Settings, Status } from "./types";
+import type { Account, AppError, Info, InviteResult, Prefs, Relay, ReportResult, Server, Settings, Status } from "./types";
 
 export type EventMap = {
   status: Status;
@@ -19,6 +19,7 @@ export interface Api {
   settings(): Promise<Settings>;
   setSettings(s: Settings): Promise<void>;
   unblock(): Promise<void>;
+  reportDiagnostics(): Promise<ReportResult>;
   installHelper(): Promise<void>;
   removeHelper(): Promise<void>;
   account(): Promise<Account>;
@@ -46,6 +47,7 @@ const wails: Api = {
   settings: () => call("Settings"),
   setSettings: (s) => call("SetSettings", s),
   unblock: () => call("Unblock"),
+  reportDiagnostics: () => call("ReportDiagnostics"),
   installHelper: () => call("InstallHelper"),
   removeHelper: () => call("RemoveHelper"),
   account: () => call("Account"),

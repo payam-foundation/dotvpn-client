@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Browser } from "@wailsio/runtime";
   import { api } from "../lib/api";
   import { app, type SettingsPage } from "../lib/app.svelte";
   import { t } from "../lib/i18n";
@@ -30,6 +31,19 @@
 
   async function unblock() {
     if (await app.run(() => api.unblock())) flash = "settings.unblocked";
+  }
+
+  async function sendDiagnostics() {
+    const r = await app.run(() => api.reportDiagnostics());
+    if (!r) return;
+    flash = r.via === "control" ? "settings.reportOk" : "settings.reportBrowser";
+    if (r.via === "browser" && r.issueUrl) {
+      try {
+        await Browser.OpenURL(r.issueUrl);
+      } catch {
+        /* helper already returned the URL; flash still tells the user */
+      }
+    }
   }
 
   async function setPreset(preset: string) {
@@ -135,7 +149,17 @@
       </div>
     </div>
     {#if app.info.trayHidden}<p class="caption warning">{t(lang, "settings.noTray")}</p>{/if}
+    <div class="card">
+      <Toggle
+        checked={!!s.crashReporting}
+        label={t(lang, "settings.crashReporting")}
+        hint={t(lang, "settings.crashReportingHint")}
+        onchange={(v) => app.saveSettings({ crashReporting: v })}
+      />
+    </div>
     <div class="card actions">
+      <button class="btn quiet block" onclick={sendDiagnostics}>{t(lang, "settings.report")}</button>
+      <p class="caption muted">{t(lang, "settings.reportHint")}</p>
       <button class="btn quiet block" onclick={unblock} disabled={app.status.running}>{t(lang, "settings.unblock")}</button>
       <p class="caption muted">{t(lang, "settings.unblockHint")}</p>
     </div>

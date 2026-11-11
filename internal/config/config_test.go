@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -28,6 +29,9 @@ func TestTunnelOnAndMigrate(t *testing.T) {
 	}
 	if c.Tun.DNSPreset != "cloudflare" || c.Tun.DNS != "1.1.1.1:53" {
 		t.Fatalf("system DNS must migrate to cloudflare, got %+v", c.Tun)
+	}
+	if c.DeviceID == "" || !strings.HasPrefix(c.DeviceID, "dv_") {
+		t.Fatalf("device_id must be minted, got %q", c.DeviceID)
 	}
 	if c.Migrate() {
 		t.Fatal("second migrate must be a no-op")

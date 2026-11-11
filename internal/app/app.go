@@ -83,7 +83,8 @@ func NewEngine(ctx context.Context, p Params) (*client.Engine, error) {
 		}
 		tm := &client.TokenManager{Log: p.Log, Source: &discovery.Client{
 			Channels: c.Control, Verifier: auth.NewVerifier(pubs...), AccountKey: c.Account,
-			Relays: c.Relays, CachePath: filepath.Join(p.Dir, "serverlist.cache"), Bootstrap: c.Bootstrap, HTTP: p.HTTP,
+			DeviceID: c.DeviceID, Relays: c.Relays, CachePath: filepath.Join(p.Dir, "serverlist.cache"),
+			Bootstrap: c.Bootstrap, HTTP: p.HTTP,
 		}}
 		ecfg.Token, ecfg.OnUnauthorized = tm.Token, tm.Refresh
 		eng := client.NewEngine(ecfg)

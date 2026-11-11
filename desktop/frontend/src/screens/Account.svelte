@@ -68,13 +68,13 @@
     <div class="row">
       <span class="caption muted">{t(lang, "account.devices")}</span>
       <span class="small">
-        {#if (a.maxDevices ?? 0) > 0}
-          {t(lang, "account.devicesOf", {
-            used: digits((a.devicesUsed && a.devicesUsed > 0 ? a.devicesUsed : 1), lang),
-            max: digits(a.maxDevices, lang),
-          })}
-        {:else}
+        {#if !hasAccount}
           —
+        {:else}
+          {t(lang, "account.devicesOf", {
+            used: digits(Math.max(0, a.devicesUsed ?? 0), lang),
+            max: (a.maxDevices ?? 0) > 0 ? digits(a.maxDevices, lang) : "∞",
+          })}
         {/if}
       </span>
     </div>

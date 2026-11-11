@@ -213,7 +213,7 @@ func (e *Engine) drop(s transport.Session) {
 	if e.sess == s {
 		e.sess = nil
 		e.markCoolLocked(key(e.cur))
-		e.cfg.Log.Warn("carrier failed", "endpoint", e.cur.Label())
+		e.cfg.Log.Warn("rung fail", "id", EndpointID(e.cur))
 		dropped = true
 	}
 	e.mu.Unlock()
@@ -248,7 +248,7 @@ func (e *Engine) session(ctx context.Context) (transport.Session, error) {
 	delete(e.fails, key(ep))
 	delete(e.cooldown, key(ep))
 	e.mu.Unlock()
-	e.cfg.Log.Info("connected", "endpoint", ep.Label())
+	e.cfg.Log.Info("ready", "id", EndpointID(ep))
 	e.notify()
 	e.persistCool()
 	return s, nil

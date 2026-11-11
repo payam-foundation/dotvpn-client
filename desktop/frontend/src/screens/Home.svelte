@@ -7,7 +7,10 @@
   import { groupNodes } from "../lib/nodes";
   import ConnectButton from "../components/ConnectButton.svelte";
   import Hop from "../components/Hop.svelte";
+  import Icon from "../components/Icon.svelte";
   import Problem from "../components/Problem.svelte";
+
+  const auto = $derived(!(app.settings.pin ?? ""));
 
   const lang = $derived(app.lang);
   const st = $derived(app.status);
@@ -23,7 +26,8 @@
   });
 
   const routed = $derived(!!st.fullTunnel);
-  const ipLabel = $derived(connected || busy ? t(lang, "home.exitIp") : t(lang, "home.publicIp"));
+  // Label stays "IP"; Safe/Unsafe badge already says whether the address is protected.
+  const ipLabel = $derived(t(lang, "home.publicIp"));
   const ipValue = $derived.by(() => {
     // Never fall back to the direct public IP while "connected" — that is how
     // proxy-only sessions looked like a working VPN with the real address.
@@ -115,17 +119,26 @@
     {/if}
   </div>
 
-  <button class="server card" onclick={() => (app.pickerOpen = true)} disabled={app.servers.length === 0}>
-    <span class="flag" aria-hidden="true">{flagEmoji(flagCC) || "·"}</span>
-    <span class="name">
-      <span class="small">{selected ? selected.name : t(lang, "servers.empty")}</span>
-      {#if flagCC}<span class="caption muted">{flagCC}</span>{/if}
-    </span>
-    <span class="meta mono muted">
-      {#if selected?.latencyMs}{formatLatency(selected.latencyMs, lang)}
-      {:else if !app.settings.pin}{t(lang, "servers.auto")}
-      {:else}-{/if}
-    </span>
+  <button class="server card" class:auto-on={auto} onclick={() => (app.pickerOpen = true)} disabled={app.servers.length === 0}>
+    {#if auto}
+      <span class="flag auto" aria-hidden="true"><Icon name="route" size={22} /></span>
+      <span class="name">
+        <span class="small">{t(lang, "servers.auto")}</span>
+        {#if selected && (connected || busy)}
+          <span class="caption muted">{selected.name}{#if flagCC} · {flagCC}{/if}</span>
+        {:else}
+          <span class="caption muted">{t(lang, "servers.autoHint")}</span>
+        {/if}
+      </span>
+      <span class="meta mono muted">{selected?.latencyMs ? formatLatency(selected.latencyMs, lang) : "·"}</span>
+    {:else}
+      <span class="flag" aria-hidden="true">{flagEmoji(flagCC) || "·"}</span>
+      <span class="name">
+        <span class="small">{selected ? selected.name : t(lang, "servers.empty")}</span>
+        {#if flagCC}<span class="caption muted">{flagCC}</span>{/if}
+      </span>
+      <span class="meta mono muted">{selected?.latencyMs ? formatLatency(selected.latencyMs, lang) : "-"}</span>
+    {/if}
   </button>
 </section>
 
@@ -139,18 +152,19 @@
       </header>
       <ul class="list" role="radiogroup" aria-label={t(lang, "home.pickServer")}>
         <li>
-          <button role="radio" aria-checked={!app.settings.pin} class="row" onclick={pickAuto}>
-            <span class="mark" class:sel={!app.settings.pin}></span>
-            <span class="flag auto" aria-hidden="true">◎</span>
+          <button role="radio" aria-checked={auto} class="row" class:picked={auto} onclick={pickAuto}>
+            <span class="mark" class:sel={auto}></span>
+            <span class="flag auto" aria-hidden="true"><Icon name="route" size={20} /></span>
             <span class="name">
               <span class="small">{t(lang, "servers.auto")}</span>
               <span class="caption muted">{t(lang, "servers.autoHint")}</span>
             </span>
+            {#if auto}<span class="meta caption live">{t(lang, "servers.pinned")}</span>{/if}
           </button>
         </li>
         {#each nodes as n (n.name)}
           <li>
-            <button role="radio" aria-checked={!!app.settings.pin && n.ids.includes(app.settings.pin)} class="row" onclick={() => pick(n.id)}>
+            <button role="radio" aria-checked={!!app.settings.pin && n.ids.includes(app.settings.pin)} class="row" class:picked={!!app.settings.pin && n.ids.includes(app.settings.pin)} onclick={() => pick(n.id)}>
               <span class="mark" class:sel={!!app.settings.pin && n.ids.includes(app.settings.pin)}></span>
               <span class="flag" aria-hidden="true">{flagEmoji(n.country) || "·"}</span>
               <span class="name">
@@ -210,7 +224,12 @@
   .server:hover:not(:disabled) { background: var(--dot-surface-2); }
   .server:disabled { opacity: 0.5; cursor: default; }
   .flag { flex: none; width: 1.75em; text-align: center; font-size: 20px; line-height: 1; }
-  .flag.auto { font-size: 14px; color: var(--dot-fg-muted); }
+  .flag.auto {
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--dot-fg-muted);
+  }
+  .server.auto-on .flag.auto { color: var(--dot-fg); }
+  .row.picked { background: color-mix(in srgb, var(--dot-fg) 4%, transparent); }
   .name { flex: 1; display: flex; flex-direction: column; min-width: 0; gap: 1px; }
   .meta { flex: none; font-size: 12px; min-width: 4.5em; text-align: end; }
   .sheet { position: fixed; inset: 0; z-index: 20; display: flex; align-items: flex-end; justify-content: center; }

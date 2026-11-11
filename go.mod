@@ -27,7 +27,6 @@ require (
 	github.com/klauspost/compress v1.20.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.1 // indirect
 	github.com/klauspost/reedsolomon v1.14.2 // indirect
-	github.com/kr/pretty v0.3.0 // indirect
 	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
 	github.com/pion/datachannel v1.6.2 // indirect
 	github.com/pion/dtls/v3 v3.1.5 // indirect
@@ -71,11 +70,11 @@ require (
 	golang.org/x/time v0.16.0 // indirect
 	golang.org/x/tools v0.52.0 // indirect
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
-	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 )
 
 require (
 	github.com/Microsoft/go-winio v0.6.2
+	github.com/getsentry/sentry-go v0.50.0
 	github.com/miekg/dns v1.1.73
 	github.com/payam-foundation/dotvpn-wire v0.3.0
 	golang.org/x/mobile v0.0.0-20261011034528-197770444867
@@ -85,3 +84,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 	gvisor.dev/gvisor v0.0.0-20260408064518-65a410b0d584
 )
+
+// Local monorepo wire until device_id lands in a published tag.
+replace github.com/payam-foundation/dotvpn-wire => ../dotvpn-wire

@@ -3,6 +3,8 @@ package config
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -21,7 +23,7 @@ import (
 
 // SchemaCurrent is the config migration watermark. Bump when changing defaults
 // that must rewrite existing files once.
-const SchemaCurrent = 3
+const SchemaCurrent = 4
 
 // Config is the client's YAML file.
 type Config struct {
@@ -38,7 +40,9 @@ type Config struct {
 	Token          string               `yaml:"token"`
 	TokenFile      string               `yaml:"token_file"`
 	Account        string               `yaml:"account_key"`
-	Endpoints      []transport.Endpoint `yaml:"endpoints"`
+	// DeviceID is a stable per-install seat id sent to control on token/account.
+	DeviceID  string               `yaml:"device_id,omitempty"`
+	Endpoints []transport.Endpoint `yaml:"endpoints"`
 	// Control is how to reach the control plane, in discovery order.
 	Control    []discovery.ControlChannel `yaml:"control"`
 	TrustedKey []string                   `yaml:"trusted_keys"`
@@ -63,6 +67,8 @@ type Config struct {
 	Carriers []string `yaml:"carriers,omitempty"`
 	Tun      TunConfig     `yaml:"tun"`
 	Routing  RoutingConfig `yaml:"routing"`
+	// CrashReporting enables opt-in Sentry crash reports (off by default).
+	CrashReporting bool `yaml:"crash_reporting,omitempty"`
 }
 
 // TunConfig configures full-tunnel mode.
@@ -97,38 +103,54 @@ func (t TunConfig) TunnelOn() bool {
 // Migrate rewrites legacy defaults in place. Returns whether the caller should
 // persist the config.
 func (c *Config) Migrate() bool {
-	if c.Schema >= SchemaCurrent {
-		return false
-	}
-	orig := c.Schema
-	// Schema 0→1: older builds wrote enabled:false (Go zero / buggy Settings)
-	// even with dns_preset set, which left Connect in proxy-only mode and the
-	// UI showing the real public IP. Product default is full tunnel; users who
-	// want SOCKS-only can turn "Route all traffic" off after this lands.
-	if orig < 1 {
-		if c.Tun.Enabled == nil || !*c.Tun.Enabled {
-			c.Tun.SetEnabled(true)
+	changed := false
+	if c.Schema < SchemaCurrent {
+		orig := c.Schema
+		// Schema 0→1: older builds wrote enabled:false (Go zero / buggy Settings)
+		// even with dns_preset set, which left Connect in proxy-only mode and the
+		// UI showing the real public IP. Product default is full tunnel; users who
+		// want SOCKS-only can turn "Route all traffic" off after this lands.
+		if orig < 1 {
+			if c.Tun.Enabled == nil || !*c.Tun.Enabled {
+				c.Tun.SetEnabled(true)
+			}
+			if c.Tun.DNSPreset == "" {
+				c.Tun.DNSPreset = "cloudflare"
+			}
 		}
-		if c.Tun.DNSPreset == "" {
+		// Schema 1→2: dns_preset "system" was persisted as the literal DNS address
+		// "system", which cannot be dialed ("missing port in address").
+		if orig < 2 && (c.Tun.DNS == "system" || c.Tun.DNSPreset == "system") {
+			c.Tun.DNSPreset = "system"
+			c.Tun.DNS = ""
+		}
+		// Schema 2→3: "system" as the bypass resolver races with the tunnel's
+		// fake DNS (198.18.0.2) and often becomes unreachable; use Cloudflare
+		// for the client's own physical-path lookups. Users can still pick
+		// system in Settings afterward.
+		if orig < 3 && (c.Tun.DNSPreset == "system" || c.Tun.DNS == "" || c.Tun.DNS == "system" || isFakeTunDNS(c.Tun.DNS)) {
 			c.Tun.DNSPreset = "cloudflare"
+			c.Tun.DNS = "1.1.1.1:53"
+		}
+		c.Schema = SchemaCurrent
+		changed = true
+	}
+	// Schema 3→4 (and any empty file): mint a stable seat id once.
+	if c.DeviceID == "" {
+		if id, err := newDeviceID(); err == nil {
+			c.DeviceID = id
+			changed = true
 		}
 	}
-	// Schema 1→2: dns_preset "system" was persisted as the literal DNS address
-	// "system", which cannot be dialed ("missing port in address").
-	if orig < 2 && (c.Tun.DNS == "system" || c.Tun.DNSPreset == "system") {
-		c.Tun.DNSPreset = "system"
-		c.Tun.DNS = ""
+	return changed
+}
+
+func newDeviceID() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
 	}
-	// Schema 2→3: "system" as the bypass resolver races with the tunnel's
-	// fake DNS (198.18.0.2) and often becomes unreachable; use Cloudflare
-	// for the client's own physical-path lookups. Users can still pick
-	// system in Settings afterward.
-	if c.Tun.DNSPreset == "system" || c.Tun.DNS == "" || c.Tun.DNS == "system" || isFakeTunDNS(c.Tun.DNS) {
-		c.Tun.DNSPreset = "cloudflare"
-		c.Tun.DNS = "1.1.1.1:53"
-	}
-	c.Schema = SchemaCurrent
-	return true
+	return "dv_" + base64.RawURLEncoding.EncodeToString(b[:]), nil
 }
 
 // isFakeTunDNS reports the reserved fakedns/CGNAT range we point the OS at.

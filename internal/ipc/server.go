@@ -151,6 +151,8 @@ func (s *server) call(req request) (any, error) {
 		return nil, b.RemoveRelay(id)
 	case MethodLogout:
 		return nil, b.Logout()
+	case MethodReport:
+		return b.ReportDiagnostics()
 	}
 	return nil, errors.New("unknown method " + req.Method)
 }

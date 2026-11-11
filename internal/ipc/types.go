@@ -9,7 +9,9 @@ package ipc
 import "time"
 
 // Version is the protocol version; client and helper must match.
-const Version = 7
+// Bump when the helper binary must be reinstalled for a protocol or
+// behavior change the desktop cannot paper over.
+const Version = 8
 
 // State is where the connection is in its life.
 type State string
@@ -121,4 +123,12 @@ type Settings struct {
 	Carriers      []string `json:"carriers,omitempty"`
 	DirectDomains []string `json:"directDomains"`
 	DirectCIDRs   []string `json:"directCidrs"`
+	// CrashReporting is opt-in crash reporting (off by default).
+	CrashReporting bool `json:"crashReporting"`
+}
+
+// ReportResult is the outcome of Send diagnostics.
+type ReportResult struct {
+	IssueURL string `json:"issueUrl"`
+	Via      string `json:"via"` // control | browser
 }
