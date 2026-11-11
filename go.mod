@@ -1,6 +1,6 @@
 module github.com/payam-foundation/dotvpn-client
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/andybalholm/brotli v1.2.7 // indirect
@@ -76,7 +76,7 @@ require (
 	github.com/Microsoft/go-winio v0.6.2
 	github.com/getsentry/sentry-go v0.50.0
 	github.com/miekg/dns v1.1.73
-	github.com/payam-foundation/dotvpn-wire v0.3.0
+	github.com/payam-foundation/dotvpn-wire v0.4.0
 	golang.org/x/mobile v0.0.0-20261011034528-197770444867
 	golang.org/x/sys v0.49.0
 	golang.zx2c4.com/wireguard v0.0.0-20261024220952-b3bc704ef0ee
@@ -84,6 +84,3 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 	gvisor.dev/gvisor v0.0.0-20260408064518-65a410b0d584
 )
-
-// Local monorepo wire until device_id lands in a published tag.
-replace github.com/payam-foundation/dotvpn-wire => ../dotvpn-wire
