@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { digits, formatBytes, formatDuration, formatLatency, formatRate, middleTruncate } from "./format";
 import en from "../i18n/en.json";
 import fa from "../i18n/fa.json";
-import { flagEmoji } from "./flag";
+import { flagCode, flagEmoji } from "./flag";
 import { dir, errorText, systemLang, t } from "./i18n";
 import { groupNodes } from "./nodes";
 import { MAX_SAMPLES, push, rate } from "./throughput";
@@ -34,10 +34,10 @@ describe("format", () => {
   });
 
   it("keeps both ends of a long invite", () => {
-    const s = "dotvpn://" + "a".repeat(80) + "END";
+    const s = "dv://" + "a".repeat(80) + "END";
     const out = middleTruncate(s, 30);
     expect(out).toHaveLength(30);
-    expect(out.startsWith("dotvpn://")).toBe(true);
+    expect(out.startsWith("dv://")).toBe(true);
     expect(out.endsWith("END")).toBe(true);
     expect(middleTruncate("short", 30)).toBe("short");
   });
@@ -150,5 +150,16 @@ describe("nodes and flags", () => {
     expect(flagEmoji("DE")).toBe("🇩🇪");
     expect(flagEmoji("")).toBe("");
     expect(flagEmoji("x")).toBe("");
+  });
+
+  it("normalises ISO codes for the flag chip", () => {
+    expect(flagCode(" de ")).toBe("DE");
+    expect(flagCode("DEU")).toBe("");
+    expect(flagCode(undefined)).toBe("");
+  });
+
+  it("labels account replacement distinctly from invite import", () => {
+    expect(en["account.replace"]).toBe("Replace account");
+    expect(fa["account.replace"]).not.toBe(fa["action.import"]);
   });
 });

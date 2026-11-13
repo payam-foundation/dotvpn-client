@@ -11,7 +11,7 @@ import "time"
 // Version is the protocol version; client and helper must match.
 // Bump when the helper binary must be reinstalled for a protocol or
 // behavior change the desktop cannot paper over.
-const Version = 8
+const Version = 12
 
 // State is where the connection is in its life.
 type State string
@@ -40,13 +40,16 @@ type Status struct {
 	// Error is the last failure, in the helper's words.
 	Error string `json:"error,omitempty"`
 	// Carrier is the active transport ("h3", "cdnws", ...), Server its name.
-	Carrier   string    `json:"carrier,omitempty"`
-	Server    string    `json:"server,omitempty"`
-	Country   string    `json:"country,omitempty"`
+	Carrier string `json:"carrier,omitempty"`
+	Server  string `json:"server,omitempty"`
+	Country string `json:"country,omitempty"`
 	// ViaRelay is set when the active path is reverse/dns: the relay display name.
-	ViaRelay  string    `json:"viaRelay,omitempty"`
-	LatencyMS int       `json:"latencyMs,omitempty"`
-	Since     time.Time `json:"since,omitzero"`
+	ViaRelay     string `json:"viaRelay,omitempty"`
+	ViaRelayTier string `json:"viaRelayTier,omitempty"`
+	// ViaRelayID is the control-plane relay id for ad/slot lookups (Params["relay_id"]).
+	ViaRelayID string    `json:"viaRelayId,omitempty"`
+	LatencyMS  int       `json:"latencyMs,omitempty"`
+	Since        time.Time `json:"since,omitzero"`
 	// ExitIP is the probed public address through the tunnel, when known.
 	ExitIP string `json:"exitIp,omitempty"`
 	// PublicIP is the device's current public address (direct), when known.
@@ -80,7 +83,9 @@ type Server struct {
 // Account is the safe view of the subscription (no keys).
 type Account struct {
 	Name           string `json:"name"`
+	Package        string `json:"package,omitempty"`
 	QuotaLimit     int64  `json:"quotaLimit"`
+	QuotaUsed      int64  `json:"quotaUsed"`
 	QuotaRemaining int64  `json:"quotaRemaining"`
 	QuotaReset     string `json:"quotaReset,omitempty"`
 	Expires        int64  `json:"expires,omitempty"`
@@ -91,6 +96,19 @@ type Account struct {
 	Disabled    bool `json:"disabled"`
 }
 
+// Ad is a client ad slot payload from control.
+type Ad struct {
+	ID       string `json:"id"`
+	Issuer   string `json:"issuer"`
+	RelayID  string `json:"relayId,omitempty"`
+	Format   string `json:"format"`
+	ImageURL string `json:"imageUrl,omitempty"`
+	IconURL  string `json:"iconUrl,omitempty"`
+	Title    string `json:"title,omitempty"`
+	Desc     string `json:"desc,omitempty"`
+	Link     string `json:"link,omitempty"`
+}
+
 // Relay is a safe curated/community relay row.
 type Relay struct {
 	ID      string `json:"id"`
@@ -98,8 +116,18 @@ type Relay struct {
 	Country string `json:"country,omitempty"`
 	Tier    string `json:"tier"`
 	Health  string `json:"health"`
+	Invite  string `json:"invite,omitempty"`
+	// Public is true when the relay is in the open catalog (system or donated).
+	Public bool `json:"public"`
 	// OptedIn is true when the user pasted this id (community / private).
 	OptedIn bool `json:"optedIn"`
+}
+
+// ImportResult is the outcome of ImportInvite.
+type ImportResult struct {
+	// NeedsRelay is true when the invite saved but control was unreachable,
+	// so the UI should offer a bootstrap relay.
+	NeedsRelay bool `json:"needsRelay"`
 }
 
 // Settings are the helper-owned options. The app's own preferences (language,
@@ -119,6 +147,8 @@ type Settings struct {
 	SystemDNS string `json:"systemDns,omitempty"`
 	// Pin is a Server.ID; empty means automatic.
 	Pin string `json:"pin,omitempty"`
+	// UseRelays enables reverse and DNS relay transports.
+	UseRelays bool `json:"useRelays"`
 	// Carriers lists enabled kinds; empty means Auto (all).
 	Carriers      []string `json:"carriers,omitempty"`
 	DirectDomains []string `json:"directDomains"`

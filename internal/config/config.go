@@ -36,10 +36,10 @@ type Config struct {
 	ListenAuth string `yaml:"listen_auth"`
 	// ListenAuthFile holds "user:pass" (first line); use it to keep the secret
 	// out of the main config.
-	ListenAuthFile string               `yaml:"listen_auth_file"`
-	Token          string               `yaml:"token"`
-	TokenFile      string               `yaml:"token_file"`
-	Account        string               `yaml:"account_key"`
+	ListenAuthFile string `yaml:"listen_auth_file"`
+	Token          string `yaml:"token"`
+	TokenFile      string `yaml:"token_file"`
+	Account        string `yaml:"account_key"`
 	// DeviceID is a stable per-install seat id sent to control on token/account.
 	DeviceID  string               `yaml:"device_id,omitempty"`
 	Endpoints []transport.Endpoint `yaml:"endpoints"`
@@ -48,7 +48,9 @@ type Config struct {
 	TrustedKey []string                   `yaml:"trusted_keys"`
 	// Bootstrap is a signed server list embedded at install time.
 	Bootstrap string `yaml:"bootstrap"`
-	Fragment  bool   `yaml:"fragment"`
+	// Mirrors are HTTPS fallbacks serving signed server lists.
+	Mirrors  []string `yaml:"mirrors,omitempty"`
+	Fragment bool     `yaml:"fragment"`
 	// UpstreamProxy ("socks5://host:port" or "http://host:port") carries every
 	// TCP carrier; UDP carriers (h3, dns) are disabled while it is set.
 	UpstreamProxy string `yaml:"upstream_proxy"`
@@ -63,8 +65,10 @@ type Config struct {
 	Pin string `yaml:"pin,omitempty"`
 	// Relays are opted-in private/community relay ids sent on token refresh.
 	Relays []string `yaml:"relays,omitempty"`
+	// UseRelays enables reverse and DNS relay transports.
+	UseRelays bool `yaml:"use_relays,omitempty"`
 	// Carriers lists enabled transport kinds; empty means Auto (all).
-	Carriers []string `yaml:"carriers,omitempty"`
+	Carriers []string      `yaml:"carriers,omitempty"`
 	Tun      TunConfig     `yaml:"tun"`
 	Routing  RoutingConfig `yaml:"routing"`
 	// CrashReporting enables opt-in Sentry crash reports (off by default).
@@ -236,6 +240,9 @@ func (c *Config) Apply(i invite.Invite) {
 	}
 	if i.Bootstrap != "" {
 		c.Bootstrap = i.Bootstrap
+	}
+	if len(i.Mirrors) > 0 {
+		c.Mirrors = append([]string(nil), i.Mirrors...)
 	}
 	// Joining a network turns the system tunnel on. Proxy-only stays a
 	// deliberate Settings choice after schema migration.

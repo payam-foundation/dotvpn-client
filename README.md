@@ -53,14 +53,14 @@ go install github.com/payam-foundation/dotvpn-client/cmd/dotvpn@vX.Y.Z
 A tray app for macOS, Linux and Windows (`desktop/`, Wails + Svelte). It is unprivileged and talks to a helper service that holds the tunnel and kill switch, so quitting the app does not drop the tunnel and a GUI crash does not leak. Nav is **Home | Account | Relay | Settings**. Home uses a centered on/off switch (ink, never lime), node picker, kill switch, and via-relay / exit-IP when known. Account and Relay call `GET /v1/account` and `GET /v1/relays` through the helper; Settings covers App, Connection (protocols + bypass), DNS presets, Send diagnostics, and optional crash reports (off by default; Sentry `dv-desktop`).
 
 1. Open the app and choose **Set up Dot VPN**. The helper is embedded in the app; this copies it to a root-owned system path and registers the service, with one OS admin prompt. Nothing else to download.
-2. Paste an invite from Account (or first-run), or click a `dotvpn://` link.
+2. Paste an invite from Account (or first-run), or click a `dv://` link.
 3. Connect from Home or the tray menu. Closing the window hides it to the tray.
 
 The same helper is driven from a terminal:
 
 ```sh
 sudo dotvpn service install                   # once; also `uninstall` and `status`
-dotvpn import 'dotvpn://...'
+dotvpn import 'dv://...'
 dotvpn connect && dotvpn status
 dotvpn report                              # scrubbed diagnostics → control or GitHub draft
 dotvpn disconnect
@@ -102,10 +102,10 @@ CI builds the GUI on all three systems and the lab covers Linux full tunnel thro
 
 ## Quick start
 
-Get an invite (`dotvpn://...`) from the operator of a [dotvpn-core](https://github.com/payam-foundation/dotvpn-core) server.
+Get an invite (`dv://...`) from the operator of a [dotvpn-core](https://github.com/payam-foundation/dotvpn-core) server.
 
 ```sh
-dotvpn -invite 'dotvpn://...'                 # saves the config, then runs a SOCKS5 and HTTP proxy on 127.0.0.1:1080
+dotvpn -invite 'dv://...'                 # saves the config, then runs a SOCKS5 and HTTP proxy on 127.0.0.1:1080
 dotvpn                                        # later runs use the saved config
 sudo dotvpn -tun -kill-switch                 # full tunnel with kill switch (Administrator on Windows)
 sudo dotvpn -unblock                          # remove kill-switch rules left behind by a crash

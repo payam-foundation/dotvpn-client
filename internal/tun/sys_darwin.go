@@ -90,7 +90,7 @@ func pinHostRoutes(u *undo, c sysConfig) error {
 	gw := c.Gateway.String()
 	seen := map[string]bool{}
 	for _, ip := range c.PinHosts {
-		if ip == nil || ip.IsUnspecified() || ip.IsLoopback() {
+		if !pinHostCompatible(c.Gateway, ip) {
 			continue
 		}
 		host := ip.String()

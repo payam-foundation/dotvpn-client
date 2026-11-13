@@ -79,9 +79,13 @@ for (const theme of ["light", "dark"] as const) {
       await expect(page.getByText("Davod")).toBeVisible();
       await shot(page, `account-${theme}`);
       await page.getByRole("button", { name: "Relay" }).click();
-      await expect(page.getByText("Relay DE")).toBeVisible();
-      await expect(page.getByText("Friends NL")).toBeVisible();
       await shot(page, `relay-${theme}`);
+      await page.getByRole("button", { name: /Public relays/ }).click();
+      await expect(page.getByText("Relay DE")).toBeVisible();
+      await page.getByRole("button", { name: "Back" }).first().click();
+      await page.getByRole("button", { name: /Private relays/ }).click();
+      await expect(page.getByText("Friends NL")).toBeVisible();
+      await page.getByRole("button", { name: "Back" }).first().click();
       await page.getByRole("button", { name: "Settings" }).click();
       await page.getByRole("tab", { name: "Connection" }).click();
       await expect(page.getByRole("switch", { name: /Block traffic/ })).toBeVisible();
@@ -131,7 +135,7 @@ test("first run: set up helper, then add invite", async ({ page }) => {
   await page.getByRole("button", { name: "Add invite" }).click();
   await expect(page.getByText("This invite link isn't valid. Ask the operator for a new one.")).toBeVisible();
   await shot(page, "invite-error-light");
-  await page.getByLabel("Invite link").fill("dotvpn://eyJ2IjoxLCJub2RlIjoiZXhhbXBsZS5jb20ifQ");
+  await page.getByLabel("Invite link").fill("dv://eyJ2IjoxLCJub2RlIjoiZXhhbXBsZS5jb20ifQ");
   await page.getByRole("button", { name: "Add invite" }).click();
   await expect(page.getByRole("switch", { name: "Connect" })).toBeVisible();
 });
@@ -139,7 +143,7 @@ test("first run: set up helper, then add invite", async ({ page }) => {
 test("account opens invite screen", async ({ page }) => {
   await open(page, "state=off");
   await page.getByRole("button", { name: "Account" }).click();
-  await page.getByRole("button", { name: "Add invite" }).click();
+  await page.getByRole("button", { name: "Replace account" }).click();
   await page.getByRole("button", { name: "Paste" }).click();
   await expect(page.getByLabel("Invite link")).toHaveValue(/^dotvpn:\/\/.*…/);
   await expect(page.getByLabel("Invite link")).toHaveAttribute("dir", "ltr");

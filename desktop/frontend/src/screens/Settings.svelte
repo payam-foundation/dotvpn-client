@@ -4,7 +4,8 @@
   import { app, type SettingsPage } from "../lib/app.svelte";
   import { t } from "../lib/i18n";
   import { parseEntries } from "../lib/validate";
-  import type { Lang, Theme } from "../lib/types";
+  import type { Lang, ReportResult, Theme } from "../lib/types";
+  import Icon from "../components/Icon.svelte";
   import Problem from "../components/Problem.svelte";
   import Segmented from "../components/Segmented.svelte";
   import Toggle from "../components/Toggle.svelte";
@@ -17,7 +18,7 @@
   let routeErr = $state("");
   let flash = $state("");
 
-  const carriers = ["h3", "h2", "cdnws", "webtunnel", "snowflake", "reverse", "dns"] as const;
+  const carriers = ["h3", "h2", "cdnws", "webtunnel", "snowflake"] as const;
 
   const presetMeta: Record<string, string> = {
     cloudflare: "1.1.1.1",
@@ -33,13 +34,33 @@
     if (await app.run(() => api.unblock())) flash = "settings.unblocked";
   }
 
+  async function openHelperLog() {
+    const ok = await app.run(() => api.openHelperLog());
+    if (ok) flash = "settings.helperLogOpened";
+  }
+
+  async function copyHelperLogPath() {
+    const path = await api.helperLogPath();
+    if (!path) return;
+    try {
+      await navigator.clipboard.writeText(path);
+      flash = "settings.helperLogCopied";
+    } catch {
+      flash = "settings.helperLogPath";
+    }
+  }
+
   async function sendDiagnostics() {
-    const r = await app.run(() => api.reportDiagnostics());
-    if (!r) return;
-    flash = r.via === "control" ? "settings.reportOk" : "settings.reportBrowser";
-    if (r.via === "browser" && r.issueUrl) {
+    const out: { result?: ReportResult } = {};
+    const ok = await app.run(async () => {
+      out.result = await api.reportDiagnostics();
+    });
+    const result = out.result;
+    if (!ok || !result) return;
+    flash = result.via === "control" ? "settings.reportOk" : "settings.reportBrowser";
+    if (result.via === "browser" && result.issueUrl) {
       try {
-        await Browser.OpenURL(r.issueUrl);
+        await Browser.OpenURL(result.issueUrl);
       } catch {
         /* helper already returned the URL; flash still tells the user */
       }
@@ -123,7 +144,10 @@
 </script>
 
 <section class="page">
-  <h1 class="h3">{t(lang, "settings.title")}</h1>
+  <header class="head">
+    <Icon name="settings" size={22} />
+    <h1 class="h3">{t(lang, "settings.title")}</h1>
+  </header>
   <div class="subnav" role="tablist" aria-label={t(lang, "settings.title")}>
     {#each pages as p}
       <button role="tab" aria-selected={page === p.id} class="sub" onclick={() => (app.settingsPage = p.id)}>{t(lang, p.key)}</button>
@@ -138,6 +162,13 @@
       <hr />
       <Toggle checked={app.prefs.startMinimized} label={t(lang, "settings.startMinimized")} disabled={app.info.trayHidden} onchange={(v) => app.savePrefs({ startMinimized: v })} />
       <hr />
+      <Toggle
+        checked={!!s.crashReporting}
+        label={t(lang, "settings.crashReporting")}
+        hint={t(lang, "settings.crashReportingHint")}
+        onchange={(v) => app.saveSettings({ crashReporting: v })}
+      />
+      <hr />
       <div class="pick">
         <span class="small">{t(lang, "settings.language")}</span>
         <Segmented value={lang} options={langs} label={t(lang, "settings.language")} onchange={(v) => app.setLang(v)} />
@@ -149,17 +180,12 @@
       </div>
     </div>
     {#if app.info.trayHidden}<p class="caption warning">{t(lang, "settings.noTray")}</p>{/if}
-    <div class="card">
-      <Toggle
-        checked={!!s.crashReporting}
-        label={t(lang, "settings.crashReporting")}
-        hint={t(lang, "settings.crashReportingHint")}
-        onchange={(v) => app.saveSettings({ crashReporting: v })}
-      />
-    </div>
     <div class="card actions">
       <button class="btn quiet block" onclick={sendDiagnostics}>{t(lang, "settings.report")}</button>
       <p class="caption muted">{t(lang, "settings.reportHint")}</p>
+      <button class="btn quiet block" onclick={openHelperLog}>{t(lang, "settings.openHelperLog")}</button>
+      <button class="btn quiet block" onclick={copyHelperLogPath}>{t(lang, "settings.copyHelperLog")}</button>
+      <p class="caption muted">{t(lang, "settings.helperLogHint")}</p>
       <button class="btn quiet block" onclick={unblock} disabled={app.status.running}>{t(lang, "settings.unblock")}</button>
       <p class="caption muted">{t(lang, "settings.unblockHint")}</p>
     </div>
@@ -168,6 +194,8 @@
       <Toggle checked={s.fullTunnel} label={t(lang, "settings.fullTunnel")} hint={t(lang, "settings.fullTunnelHint")} disabled={s.killSwitch} onchange={(v) => app.saveSettings({ fullTunnel: v })} />
       <hr />
       <Toggle checked={s.killSwitch} label={t(lang, "settings.killSwitch")} hint={t(lang, "settings.killSwitchHint")} onchange={(v) => app.saveSettings({ killSwitch: v })} />
+      <hr />
+      <Toggle checked={s.useRelays} label={t(lang, "settings.useRelays")} hint={t(lang, "settings.useRelaysHint")} onchange={(v) => app.saveSettings({ useRelays: v })} />
     </div>
     <div class="group">
       <h2 class="caption muted">{t(lang, "settings.carriers")}</h2>
@@ -272,6 +300,7 @@
     background:
       radial-gradient(70% 40% at 100% 0%, color-mix(in srgb, var(--dot-fg) 4%, transparent), transparent 65%);
   }
+  .head { display: flex; align-items: center; gap: var(--dot-space-2); }
   .subnav { display: flex; gap: var(--dot-space-2); flex-wrap: wrap; }
   .sub {
     padding: 6px var(--dot-space-3); border: 1px solid var(--dot-border); border-radius: var(--dot-radius-pill);

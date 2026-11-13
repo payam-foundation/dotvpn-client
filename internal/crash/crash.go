@@ -138,7 +138,7 @@ func (e errString) Error() string { return string(e) }
 var (
 	reIPv4   = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
 	reBearer = regexp.MustCompile(`(?i)bearer\s+[a-z0-9._\-]{8,}`)
-	reInvite = regexp.MustCompile(`(?i)dotvpn://[^\s"']+`)
+	reInvite = regexp.MustCompile(`(?i)dv://[^\s"']+`)
 )
 
 func beforeSend(event *sentry.Event, _ *sentry.EventHint) *sentry.Event {
@@ -155,11 +155,11 @@ func beforeSend(event *sentry.Event, _ *sentry.EventHint) *sentry.Event {
 	for i := range event.Exception {
 		event.Exception[i].Value = scrub(event.Exception[i].Value)
 	}
-	if strings.Contains(strings.ToLower(event.Message), "bearer") || strings.Contains(event.Message, "dotvpn://") {
+	if strings.Contains(strings.ToLower(event.Message), "bearer") || strings.Contains(event.Message, "dv://") {
 		return nil
 	}
 	for _, ex := range event.Exception {
-		if strings.Contains(strings.ToLower(ex.Value), "bearer") || strings.Contains(ex.Value, "dotvpn://") {
+		if strings.Contains(strings.ToLower(ex.Value), "bearer") || strings.Contains(ex.Value, "dv://") {
 			return nil
 		}
 	}

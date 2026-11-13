@@ -8,9 +8,11 @@ package mobile
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -27,12 +29,13 @@ import (
 	inttun "github.com/payam-foundation/dotvpn-client/internal/tun"
 	"github.com/payam-foundation/dotvpn-wire/invite"
 	"github.com/payam-foundation/dotvpn-wire/transport"
+	"github.com/payam-foundation/dotvpn-wire/transport/reverse"
 )
 
-// AppVersion is set by the Android shell / gomobile build.
-var AppVersion = "dev"
+// appVersion is set by the Android shell via SetAppVersion.
+var appVersion = "dev"
 
-var mobileRing = diag.NewRing("android", AppVersion)
+var mobileRing = diag.NewRing("android", appVersion)
 
 // SetAppVersion records the shell version for diagnostics bundles.
 func SetAppVersion(v string) {
@@ -40,7 +43,7 @@ func SetAppVersion(v string) {
 	if v == "" {
 		return
 	}
-	AppVersion = v
+	appVersion = v
 	mobileRing.SetVersion(v)
 }
 
@@ -65,7 +68,7 @@ type Protector interface {
 	Protect(fd int) bool
 }
 
-// ImportInvite turns a dotvpn:// invite into a client config (YAML) with the
+// ImportInvite turns a dv:// invite into a client config (YAML) with the
 // full tunnel enabled. The app stores it and passes it to Start.
 func ImportInvite(uri string) (string, error) {
 	i, err := invite.DecodeInvite(uri)
@@ -93,6 +96,76 @@ func Endpoints(cfg string) (string, error) {
 		b.WriteByte('\n')
 	}
 	return b.String(), nil
+}
+
+// ProbeServers dials each ladder rung once (non-recurring) and returns JSON
+// [{"id","name","carrier","country","latencyMs","error"}]. p must protect sockets when a
+// tunnel is up; a no-op protector is fine while the VPN is off.
+func ProbeServers(cfgYAML, dataDir string, p Protector) (string, error) {
+	if p == nil {
+		return "", errors.New("mobile: protector required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	mu.Lock()
+	eng := (*client.Engine)(nil)
+	if cur != nil {
+		eng = cur.eng
+	}
+	mu.Unlock()
+	if eng != nil {
+		eng.ProbeAll(ctx)
+		return marshalProbeHealth(eng.Health())
+	}
+
+	c, err := config.Parse([]byte(cfgYAML))
+	if err != nil {
+		return "", err
+	}
+	_ = c.Migrate()
+	dns := ensureDNSPort(c.Tun.DNS)
+	bypass := inttun.NewProtectedBypass(dns, p.Protect)
+	opts := transport.Options{Control: bypass.Control, Resolver: bypass.Resolver(), DNS: dns}
+	if !c.Tun.DoH {
+		opts.DoH = []transport.DoHServer{}
+	}
+	ctl := &http.Client{Timeout: 15 * time.Second, Transport: &http.Transport{
+		DialContext: bypass.DialContext, Proxy: nil, ForceAttemptHTTP2: true,
+		TLSHandshakeTimeout: 10 * time.Second,
+	}}
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	tmp, err := app.NewEngine(ctx, app.Params{Config: c, Dir: dataDir, Opts: opts, HTTP: ctl, Log: log})
+	if err != nil {
+		return "", err
+	}
+	defer tmp.Close()
+	tmp.ProbeAll(ctx)
+	return marshalProbeHealth(tmp.Health())
+}
+
+func marshalProbeHealth(hs []client.Health) (string, error) {
+	type row struct {
+		ID        string `json:"id"`
+		Name      string `json:"name"`
+		Carrier   string `json:"carrier"`
+		Country   string `json:"country,omitempty"`
+		LatencyMS int    `json:"latencyMs"`
+		Error     string `json:"error"`
+	}
+	out := make([]row, 0, len(hs))
+	for _, x := range hs {
+		name := x.Endpoint.Name
+		if name == "" {
+			name = string(x.Endpoint.Kind)
+		}
+		out = append(out, row{
+			ID: x.ID, Name: name, Carrier: string(x.Endpoint.Kind), Country: x.Endpoint.Params["cc"],
+			LatencyMS: int(x.Latency.Milliseconds()), Error: x.Err,
+		})
+	}
+	b, err := json.Marshal(out)
+	return string(b), err
 }
 
 type session struct {
@@ -148,8 +221,13 @@ func start(cfg, dataDir string, dev tun.Device, p Protector) error {
 		log.Warn("guard ignored on mobile; use system Always-on block")
 	}
 	mobileRing.Note(diag.Event{Code: diag.CodeStart})
-	bypass := inttun.NewProtectedBypass(c.Tun.DNS, p.Protect)
-	opts := transport.Options{Control: bypass.Control, Resolver: bypass.Resolver(), DNS: c.Tun.DNS}
+	dns := ensureDNSPort(c.Tun.DNS)
+	bypass := inttun.NewProtectedBypass(dns, p.Protect)
+	opts := transport.Options{Control: bypass.Control, Resolver: bypass.Resolver(), DNS: dns}
+	// Nil DoH means transport defaults; empty non-nil disables DoH (plain DNS only).
+	if !c.Tun.DoH {
+		opts.DoH = []transport.DoHServer{}
+	}
 	ctl := &http.Client{Timeout: 15 * time.Second, Transport: &http.Transport{
 		DialContext: bypass.DialContext, Proxy: nil, ForceAttemptHTTP2: true,
 		TLSHandshakeTimeout: 10 * time.Second,
@@ -196,21 +274,44 @@ func start(cfg, dataDir string, dev tun.Device, p Protector) error {
 
 // keepConnected reconnects whenever the session drops (network change,
 // airplane mode) instead of waiting for the next flow to trigger it.
+// Backoff grows from 1s to 30s on failure (aligned with desktop connectLoop).
 func keepConnected(ctx context.Context, eng *client.Engine) {
+	backoff := time.Second
 	for ctx.Err() == nil {
-		wait := 2 * time.Second
 		if err := eng.Connect(ctx); err != nil {
 			mobileRing.Note(diag.Event{Code: diag.CodeConnectFail, Detail: "retry"})
-			wait = 5 * time.Second
-		} else {
-			info := eng.Info()
-			mobileRing.Note(diag.Event{Code: diag.CodeConnectOK, EndpointID: client.EndpointID(info.Endpoint)})
+			select {
+			case <-ctx.Done():
+			case <-time.After(backoff):
+			}
+			if backoff < 30*time.Second {
+				backoff *= 2
+				if backoff > 30*time.Second {
+					backoff = 30 * time.Second
+				}
+			}
+			continue
 		}
+		backoff = time.Second
+		info := eng.Info()
+		mobileRing.Note(diag.Event{Code: diag.CodeConnectOK, EndpointID: client.EndpointID(info.Endpoint)})
 		select {
 		case <-ctx.Done():
-		case <-time.After(wait):
+		case <-time.After(2 * time.Second):
 		}
 	}
+}
+
+// ensureDNSPort appends :53 when dns is a bare IP or hostname.
+func ensureDNSPort(dns string) string {
+	dns = strings.TrimSpace(dns)
+	if dns == "" {
+		return "1.1.1.1:53"
+	}
+	if _, _, err := net.SplitHostPort(dns); err == nil {
+		return dns
+	}
+	return dns + ":53"
 }
 
 // Stop ends the tunnel and waits for it to close the descriptor.
@@ -226,22 +327,49 @@ func Stop() {
 	<-s.done
 }
 
-// Status is "off", "connecting", "connected <carrier>" or "error: <reason>".
+// Status is "off", "connecting", "error: <reason>", or when connected:
+//
+//	connected <kind>|<viaName>|<viaTier>|<relayID>|<sinceUnixMs>|<latencyMs>
+//
+// via* fields are empty unless the active carrier is reverse/dns. since and
+// latency are 0 when unknown.
 func Status() string {
 	mu.Lock()
 	defer mu.Unlock()
 	if cur != nil {
-		if l := cur.eng.Status(); l != "" {
-			return "connected " + l
+		if info := cur.eng.Info(); info.Connected {
+			return formatConnected(info)
 		}
 	}
 	return status
 }
 
+func formatConnected(info client.Info) string {
+	ep := info.Endpoint
+	kind := string(ep.Kind)
+	via, tier, rid := "", "", ""
+	switch ep.Kind {
+	case reverse.KindReverse, reverse.KindDNS:
+		via = ep.Name
+		if via == "" {
+			via = kind
+		}
+		if ep.Params != nil {
+			tier = ep.Params["tier"]
+			rid = ep.Params["relay_id"]
+		}
+	}
+	var since int64
+	if !info.Since.IsZero() {
+		since = info.Since.UnixMilli()
+	}
+	return fmt.Sprintf("connected %s|%s|%s|%s|%d|%d", kind, via, tier, rid, since, info.Latency.Milliseconds())
+}
+
 // ReportDiagnostics submits a scrubbed bundle to controlURL with accountKey
 // (from the invite config). Returns "url|via" for the Android UI.
 func ReportDiagnostics(cfgYAML, controlURL, accountKey string) (string, error) {
-	mobileRing.SetVersion(AppVersion)
+	mobileRing.SetVersion(appVersion)
 	mobileRing.SetState(coarseState(Status()))
 	b := mobileRing.Snapshot()
 	if controlURL == "" || accountKey == "" {

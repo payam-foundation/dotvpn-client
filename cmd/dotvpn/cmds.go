@@ -21,7 +21,7 @@ import (
 const usage = `usage: dotvpn <command>
 
   connect | disconnect | status      drive the helper
-  import <dotvpn://...>              save an invite in the helper
+  import <dv://...>              save an invite in the helper
   report                             send diagnostics (control or browser)
   service install|uninstall|status   manage the helper (needs root/Administrator to change)
   daemon                             run the helper (the service runs this)
@@ -170,9 +170,10 @@ func clientCmd(ctx context.Context, name string, args []string) error {
 		return helperErr(c.Disconnect(ctx))
 	case "import":
 		if len(args) != 1 {
-			return errors.New("import: one dotvpn:// invite")
+			return errors.New("import: one dv:// invite")
 		}
-		return helperErr(c.ImportInvite(ctx, args[0]))
+		_, err := c.ImportInvite(ctx, args[0])
+		return helperErr(err)
 	case "report":
 		r, err := c.ReportDiagnostics(ctx)
 		if err != nil {

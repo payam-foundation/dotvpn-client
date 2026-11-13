@@ -82,6 +82,34 @@ func (e *Engine) record(ep transport.Endpoint, d time.Duration, err error) {
 	e.mu.Unlock()
 }
 
+// ProbeAll dials each ladder rung once (non-recurring) and records latency.
+// Sessions from the probe are closed; the live session is left alone.
+func (e *Engine) ProbeAll(ctx context.Context) {
+	eps := e.expand(ctx, false)
+	seen := map[string]bool{}
+	for _, ep := range eps {
+		seen[key(ep)] = true
+	}
+	ranked := Probe(ctx, eps, e.cfg.Dialers, e.cfg.Token, e.cfg.ProbeTarget, 4)
+	ok := map[string]bool{}
+	for _, r := range ranked {
+		e.record(r.Endpoint, r.Total(), nil)
+		ok[key(r.Endpoint)] = true
+	}
+	for _, ep := range eps {
+		if ok[key(ep)] {
+			continue
+		}
+		e.record(ep, 0, errProbeFailed)
+	}
+}
+
+var errProbeFailed = errString("probe failed")
+
+type errString string
+
+func (e errString) Error() string { return string(e) }
+
 func (e *Engine) notify() {
 	if e.cfg.OnState != nil {
 		e.cfg.OnState(e.Info())

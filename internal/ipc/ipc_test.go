@@ -50,17 +50,20 @@ func (f *fake) Connect() error {
 	return nil
 }
 func (f *fake) Disconnect() { f.set(Status{State: StateOff, Configured: true}) }
-func (f *fake) ImportInvite(u string) error {
-	if u != "dotvpn://ok" {
-		return Coded(CodeBadInvite, errors.New("bad"))
+func (f *fake) ImportInvite(u string) (ImportResult, error) {
+	if u != "dv://ok" {
+		return ImportResult{}, Coded(CodeBadInvite, errors.New("bad"))
 	}
 	f.mu.Lock()
 	f.imported = u
 	f.st.Configured = true
 	f.mu.Unlock()
-	return nil
+	return ImportResult{}, nil
 }
 func (f *fake) Servers() []Server { return []Server{{ID: "a", Name: "n", Carrier: "h3", Active: true}} }
+func (f *fake) ProbeServers() ([]Server, error) {
+	return []Server{{ID: "a", Name: "n", Carrier: "h3", LatencyMS: 42}}, nil
+}
 func (f *fake) Settings() Settings {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -76,10 +79,17 @@ func (f *fake) Unblock() error { return nil }
 func (f *fake) Account() (Account, error) {
 	return Account{Name: "test", QuotaLimit: 0, MaxDevices: 1}, nil
 }
-func (f *fake) Relays() ([]Relay, error) { return []Relay{{ID: "r1", Name: "relay", Tier: "curated", Health: "ok"}}, nil }
-func (f *fake) AddRelay(string) error    { return nil }
-func (f *fake) RemoveRelay(string) error { return nil }
-func (f *fake) Logout() error { f.imported = ""; f.set(Status{State: StateOff, Configured: false}); return nil }
+func (f *fake) Relays() ([]Relay, error) {
+	return []Relay{{ID: "r1", Name: "relay", Tier: "curated", Health: "ok"}}, nil
+}
+func (f *fake) Ads(string, string) ([]Ad, error) { return nil, nil }
+func (f *fake) AddRelay(string) error            { return nil }
+func (f *fake) RemoveRelay(string) error         { return nil }
+func (f *fake) Logout() error {
+	f.imported = ""
+	f.set(Status{State: StateOff, Configured: false})
+	return nil
+}
 func (f *fake) ReportDiagnostics() (ReportResult, error) {
 	return ReportResult{IssueURL: "https://example.test/issues/1", Via: "browser"}, nil
 }
@@ -114,10 +124,10 @@ func TestCalls(t *testing.T) {
 	if err := c.Connect(ctx); !errors.Is(err, &Error{Code: CodeNotConfigured}) {
 		t.Fatalf("connect before import = %v", err)
 	}
-	if err := c.ImportInvite(ctx, "junk"); !errors.Is(err, &Error{Code: CodeBadInvite}) {
+	if _, err := c.ImportInvite(ctx, "junk"); !errors.Is(err, &Error{Code: CodeBadInvite}) {
 		t.Fatalf("bad invite = %v", err)
 	}
-	if err := c.ImportInvite(ctx, "dotvpn://ok"); err != nil || f.imported != "dotvpn://ok" {
+	if _, err := c.ImportInvite(ctx, "dv://ok"); err != nil || f.imported != "dv://ok" {
 		t.Fatalf("import = %v %q", err, f.imported)
 	}
 	if err := c.Connect(ctx); err != nil {
@@ -131,12 +141,12 @@ func TestCalls(t *testing.T) {
 	if err != nil || len(sv) != 1 || sv[0].Carrier != "h3" {
 		t.Fatalf("servers = %+v %v", sv, err)
 	}
-	want := Settings{FullTunnel: true, KillSwitch: true, DNS: "9.9.9.9:53", DirectDomains: []string{"a.ir"}}
+	want := Settings{FullTunnel: true, KillSwitch: true, UseRelays: true, DNS: "9.9.9.9:53", DirectDomains: []string{"a.ir"}}
 	if err := c.SetSettings(ctx, want); err != nil {
 		t.Fatal(err)
 	}
 	got, err := c.Settings(ctx)
-	if err != nil || got.DNS != want.DNS || !got.KillSwitch || len(got.DirectDomains) != 1 {
+	if err != nil || got.DNS != want.DNS || !got.KillSwitch || !got.UseRelays || len(got.DirectDomains) != 1 {
 		t.Fatalf("settings = %+v %v", got, err)
 	}
 	if err := c.Disconnect(ctx); err != nil {
@@ -153,7 +163,7 @@ func TestCalls(t *testing.T) {
 	if err != nil || len(rs) != 1 || rs[0].ID != "r1" || rs[0].Tier != "curated" {
 		t.Fatalf("relays = %+v %v", rs, err)
 	}
-	if err := c.AddRelay(ctx, "dotvpn-relay://abc"); err != nil {
+	if err := c.AddRelay(ctx, "dvr://abc"); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.RemoveRelay(ctx, "abc"); err != nil {

@@ -4,3 +4,11 @@
 .env
 *.key
 .env.sentry
+.DS_Store
+.idea/
+.vscode/
+go.work
+go.work.sum
+coverage.out
+*.pem
+.vitest/

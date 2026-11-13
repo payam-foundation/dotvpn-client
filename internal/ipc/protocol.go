@@ -22,8 +22,10 @@ const (
 	MethodRelays      = "Relays"
 	MethodAddRelay    = "AddRelay"
 	MethodRemoveRelay = "RemoveRelay"
+	MethodAds         = "Ads"
 	MethodLogout      = "Logout"
 	MethodReport      = "ReportDiagnostics"
+	MethodProbe       = "ProbeServers"
 )
 
 // maxLine bounds one request or response; an invite is a few KB.
@@ -35,7 +37,9 @@ const (
 	CodeBadInvite     = "bad_invite"
 	CodeBusy          = "busy"
 	CodeVersion       = "version"
-	CodeInternal      = "internal"
+	// CodeAuth: control rejected the saved account key (deleted/revoked invite).
+	CodeAuth     = "auth"
+	CodeInternal = "internal"
 )
 
 // Error is a failed call as the client sees it.
@@ -82,8 +86,10 @@ type Backend interface {
 	Connect() error
 	// Disconnect stops it and waits until the OS is restored.
 	Disconnect()
-	ImportInvite(uri string) error
+	ImportInvite(uri string) (ImportResult, error)
 	Servers() []Server
+	// ProbeServers dials each ladder rung once and returns servers with latency.
+	ProbeServers() ([]Server, error)
 	Settings() Settings
 	SetSettings(Settings) error
 	// Unblock removes kill-switch rules left behind by a crash.
@@ -92,6 +98,7 @@ type Backend interface {
 	Relays() ([]Relay, error)
 	AddRelay(idOrURI string) error
 	RemoveRelay(id string) error
+	Ads(slot, relayID string) ([]Ad, error)
 	// Logout clears the invite/account from this device and stops any session.
 	Logout() error
 	// ReportDiagnostics submits a scrubbed support bundle (control or browser).

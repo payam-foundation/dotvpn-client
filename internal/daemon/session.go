@@ -558,6 +558,10 @@ func (s *Session) Snapshot() ipc.Status {
 			switch i.Endpoint.Kind {
 			case "reverse", "dns":
 				st.ViaRelay = serverName(i.Endpoint)
+				if i.Endpoint.Params != nil {
+					st.ViaRelayTier = i.Endpoint.Params["tier"]
+					st.ViaRelayID = i.Endpoint.Params["relay_id"]
+				}
 			}
 		}
 	}
@@ -603,6 +607,20 @@ func (s *Session) Servers() []ipc.Server {
 	if eng == nil {
 		return nil
 	}
+	return healthServers(eng)
+}
+
+// ProbeAll dials each ladder rung once on the live engine.
+func (s *Session) ProbeAll(ctx context.Context) bool {
+	eng := s.engine()
+	if eng == nil {
+		return false
+	}
+	eng.ProbeAll(ctx)
+	return true
+}
+
+func healthServers(eng *client.Engine) []ipc.Server {
 	var out []ipc.Server
 	for _, h := range eng.Health() {
 		sv := ipc.Server{

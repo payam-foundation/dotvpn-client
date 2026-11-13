@@ -4,11 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
+	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/payam-foundation/dotvpn-client/internal/ipc"
+	"github.com/payam-foundation/dotvpn-client/internal/service"
 )
 
 // Codes beyond ipc's own that only the app produces.
@@ -90,18 +94,35 @@ func (s *AppService) Status(ctx context.Context) (ipc.Status, error) {
 	return st, toErr(err)
 }
 
-func (s *AppService) Connect(ctx context.Context) error { return toErr(s.d.ipc.Connect(ctx)) }
+func (s *AppService) Connect(ctx context.Context) error {
+	slog.Info("connect")
+	err := toErr(s.d.ipc.Connect(ctx))
+	if err != nil {
+		slog.Warn("connect failed", "err", err)
+	}
+	return err
+}
 
 func (s *AppService) Disconnect(ctx context.Context) error {
+	slog.Info("disconnect")
 	return toErr(s.d.ipc.Disconnect(ctx))
 }
 
-func (s *AppService) ImportInvite(ctx context.Context, uri string) error {
-	return toErr(s.d.ipc.ImportInvite(ctx, strings.TrimSpace(uri)))
+func (s *AppService) ImportInvite(ctx context.Context, uri string) (ipc.ImportResult, error) {
+	r, err := s.d.ipc.ImportInvite(ctx, strings.TrimSpace(uri))
+	return r, toErr(err)
 }
 
 func (s *AppService) Servers(ctx context.Context) ([]ipc.Server, error) {
 	sv, err := s.d.ipc.Servers(ctx)
+	if sv == nil {
+		sv = []ipc.Server{}
+	}
+	return sv, toErr(err)
+}
+
+func (s *AppService) ProbeServers(ctx context.Context) ([]ipc.Server, error) {
+	sv, err := s.d.ipc.ProbeServers(ctx)
 	if sv == nil {
 		sv = []ipc.Server{}
 	}
@@ -137,6 +158,14 @@ func (s *AppService) Relays(ctx context.Context) ([]ipc.Relay, error) {
 	return rs, toErr(err)
 }
 
+func (s *AppService) Ads(ctx context.Context, slot, relayID string) ([]ipc.Ad, error) {
+	ads, err := s.d.ipc.Ads(ctx, slot, relayID)
+	if ads == nil {
+		ads = []ipc.Ad{}
+	}
+	return ads, toErr(err)
+}
+
 func (s *AppService) AddRelay(ctx context.Context, idOrURI string) error {
 	return toErr(s.d.ipc.AddRelay(ctx, strings.TrimSpace(idOrURI)))
 }
@@ -149,7 +178,8 @@ func (s *AppService) Logout(ctx context.Context) error {
 	return toErr(s.d.ipc.Logout(ctx))
 }
 
-// InstallHelper installs the helper service behind one OS admin prompt.
+// InstallHelper installs the helper service behind one OS admin prompt,
+// then waits until the helper answers IPC with a matching protocol version.
 func (s *AppService) InstallHelper() error {
 	owner, err := currentOwner()
 	if err != nil {
@@ -159,7 +189,28 @@ func (s *AppService) InstallHelper() error {
 		return toErr(err)
 	}
 	s.d.watchNow()
-	return nil
+	deadline := time.Now().Add(25 * time.Second)
+	var last error
+	for time.Now().Before(deadline) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_, err := s.d.ipc.Status(ctx)
+		cancel()
+		if err == nil {
+			s.d.watchNow()
+			return nil
+		}
+		last = err
+		var ie *ipc.Error
+		if errors.As(err, &ie) && ie.Code == ipc.CodeVersion {
+			last = err
+		}
+		time.Sleep(400 * time.Millisecond)
+		s.d.watchNow()
+	}
+	if last != nil {
+		return toErr(last)
+	}
+	return &helperError{Code: codeHelperDown, Message: "helper did not become ready after install"}
 }
 
 // RemoveHelper uninstalls the helper service, which also drops any tunnel.
@@ -182,6 +233,33 @@ func (s *AppService) SetPrefs(p Prefs) error {
 	return nil
 }
 
-// TakeInvite returns the outcome of a dotvpn:// link the app was opened with
+// TakeInvite returns the outcome of a dv:// link the app was opened with
 // before the frontend was listening, once.
 func (s *AppService) TakeInvite() *InviteResult { return s.d.takeInvite() }
+
+// HelperLogPath is the helper session log location (file path or journal hint).
+func (s *AppService) HelperLogPath() string { return service.HelperLogPath() }
+
+// OpenHelperLog reveals or opens the helper log in the OS file manager / viewer.
+func (s *AppService) OpenHelperLog() error {
+	path := service.HelperLogPath()
+	if path == "" {
+		return &helperError{Code: ipc.CodeInternal, Message: "helper log path unknown on this OS"}
+	}
+	if strings.HasPrefix(path, "journalctl") {
+		return &helperError{Code: ipc.CodeInternal, Message: path}
+	}
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", "-R", path)
+	case "windows":
+		cmd = exec.Command("explorer.exe", "/select,", path)
+	default:
+		cmd = exec.Command("xdg-open", path)
+	}
+	if err := cmd.Start(); err != nil {
+		return &helperError{Code: ipc.CodeInternal, Message: err.Error()}
+	}
+	return nil
+}

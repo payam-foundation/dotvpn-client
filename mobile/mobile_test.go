@@ -9,6 +9,7 @@ import (
 
 	"golang.zx2c4.com/wireguard/tun/netstack"
 
+	"github.com/payam-foundation/dotvpn-client/client"
 	"github.com/payam-foundation/dotvpn-client/internal/config"
 	"github.com/payam-foundation/dotvpn-wire/invite"
 	"github.com/payam-foundation/dotvpn-wire/transport"
@@ -37,7 +38,7 @@ func TestImportInvite(t *testing.T) {
 	if l, err := Endpoints(y); err != nil || strings.TrimSpace(l) == "" {
 		t.Errorf("Endpoints = %q, %v", l, err)
 	}
-	for _, bad := range []string{"", "dotvpn://!!", "https://x"} {
+	for _, bad := range []string{"", "dv://!!", "https://x"} {
 		if _, err := ImportInvite(bad); err == nil {
 			t.Errorf("ImportInvite(%q) accepted", bad)
 		}
@@ -99,5 +100,14 @@ func TestStartRejects(t *testing.T) {
 	}
 	if err := start("", t.TempDir(), dev, nil); err == nil {
 		t.Error("nil protector accepted")
+	}
+}
+
+func TestProbeHealthCarriesCountry(t *testing.T) {
+	raw, err := marshalProbeHealth([]client.Health{{
+		ID: "a", Endpoint: transport.Endpoint{Kind: transport.KindH2, Name: "Berlin", Params: map[string]string{"cc": "DE"}},
+	}})
+	if err != nil || !strings.Contains(raw, `"country":"DE"`) {
+		t.Fatalf("probe json = %s, %v", raw, err)
 	}
 }

@@ -45,8 +45,9 @@ func TestTunnelOnAndMigrate(t *testing.T) {
 func TestRelaysCarriersDNSRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "c.yaml")
 	c := &Config{
-		Relays: []string{"r1", "r2"}, Carriers: []string{"h3"},
-		Tun: TunConfig{DNSPreset: "google", DoH: true, DNS: "8.8.8.8:53"},
+		Relays: []string{"r1", "r2"}, UseRelays: true, Carriers: []string{"h3"},
+		Mirrors: []string{"https://mirror.example/list"},
+		Tun:     TunConfig{DNSPreset: "google", DoH: true, DNS: "8.8.8.8:53"},
 	}
 	c.Defaults()
 	if err := Save(path, c); err != nil {
@@ -57,7 +58,7 @@ func TestRelaysCarriersDNSRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(got.Relays) != 2 || got.Relays[0] != "r1" || len(got.Carriers) != 1 ||
-		got.Tun.DNSPreset != "google" || !got.Tun.DoH {
+		!got.UseRelays || len(got.Mirrors) != 1 || got.Tun.DNSPreset != "google" || !got.Tun.DoH {
 		t.Fatalf("got %+v", got)
 	}
 }

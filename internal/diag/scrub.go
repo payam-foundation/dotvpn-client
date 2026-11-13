@@ -9,7 +9,7 @@ var (
 	reIPv4   = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
 	reIPv6   = regexp.MustCompile(`\b(?:[0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}\b`)
 	reBearer = regexp.MustCompile(`(?i)bearer\s+[a-z0-9._\-]{8,}`)
-	reInvite = regexp.MustCompile(`(?i)dotvpn://[^\s"']+`)
+	reInvite = regexp.MustCompile(`(?i)dv://[^\s"']+`)
 	reHost   = regexp.MustCompile(`\b[a-z0-9][a-z0-9.\-]+\.(com|net|org|io|dev)(:\d+)?\b`)
 )
 

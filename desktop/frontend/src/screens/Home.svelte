@@ -1,14 +1,16 @@
 <script lang="ts">
   import { api } from "../lib/api";
   import { app } from "../lib/app.svelte";
-  import { flagEmoji } from "../lib/flag";
-  import { formatLatency } from "../lib/format";
+  import { formatDuration, formatLatency } from "../lib/format";
   import { t } from "../lib/i18n";
   import { groupNodes } from "../lib/nodes";
+  import AdSlot from "../components/AdSlot.svelte";
+  import Flag from "../components/Flag.svelte";
   import ConnectButton from "../components/ConnectButton.svelte";
   import Hop from "../components/Hop.svelte";
   import Icon from "../components/Icon.svelte";
   import Problem from "../components/Problem.svelte";
+  import type { Ad } from "../lib/types";
 
   const auto = $derived(!(app.settings.pin ?? ""));
 
@@ -17,6 +19,11 @@
   const connected = $derived(st.state === "connected");
   const busy = $derived(st.state === "connecting" || st.state === "switching");
   const blocked = $derived(st.state === "switching" && st.killSwitch);
+  const relayBadge = $derived(
+    t(lang, st.viaRelayTier === "community" ? "home.communityRelay" : "home.relay", {
+      carrier: st.carrier || "relay",
+    }),
+  );
 
   const connectLabel = $derived.by(() => {
     // Same orb cancels an in-flight connect — no separate Cancel control.
@@ -24,6 +31,17 @@
     if (st.state === "failed" && st.running) return t(lang, "action.retry");
     return t(lang, "action.connect");
   });
+
+  const uptime = $derived.by(() => {
+    if (!connected || !st.since) return "";
+    const ms = app.now - Date.parse(st.since);
+    if (!Number.isFinite(ms) || ms < 0) return "";
+    return formatDuration(ms / 1000, lang);
+  });
+  const sessionPing = $derived(connected && st.latencyMs ? formatLatency(st.latencyMs, lang) : "");
+
+  let probing = $state(false);
+  let probedOnce = $state(false);
 
   const routed = $derived(!!st.fullTunnel);
   // Label stays "IP"; Safe/Unsafe badge already says whether the address is protected.
@@ -34,14 +52,18 @@
     if (connected && routed) return st.exitIp || t(lang, "home.ipChecking");
     if (connected) return "-";
     if (busy) return st.exitIp || t(lang, "home.ipChecking");
-    return st.publicIp || t(lang, "home.ipChecking");
+    if (st.publicIp) return st.publicIp;
+    // Offline / failed: do not spin on "checking" forever when the probe is empty.
+    if (st.state === "off" || st.state === "failed") return "-";
+    return t(lang, "home.ipChecking");
   });
   /** Full tunnel up = protected exit. Anything else showing a real IP is exposed. */
   const ipTone = $derived.by((): "safe" | "unsafe" | "warn" | "idle" => {
     if (connected && routed && st.exitIp) return "safe";
     if (connected && !routed) return "warn";
     if (busy) return "warn";
-    if (st.publicIp || st.state === "failed" || st.state === "off") return "unsafe";
+    if (st.publicIp) return "unsafe";
+    if (st.state === "failed" || st.state === "off") return "idle";
     return "idle";
   });
   const badgeLabel = $derived.by(() => {
@@ -73,18 +95,62 @@
     app.servers = await api.servers();
     app.pickerOpen = false;
   }
+
+  async function openPicker() {
+    app.pickerOpen = true;
+    const needProbe = !probedOnce && !app.servers.some((s) => (s.latencyMs ?? 0) > 0);
+    if (!needProbe || probing) return;
+    probing = true;
+    try {
+      app.servers = await api.probeServers();
+      probedOnce = true;
+    } catch {
+      // keep list without latencies
+    } finally {
+      probing = false;
+    }
+  }
+
+  let homeAd = $state<Ad | null>(null);
+  // Resolve control relay id for /v1/ads — never pass viaRelay display name.
+  const homeRelayId = $derived(
+    connected && st.viaRelay
+      ? st.viaRelayId || app.relays.find((r) => r.name === st.viaRelay)?.id || ""
+      : "",
+  );
+  $effect(() => {
+    if (!st.configured) {
+      homeAd = null;
+      return;
+    }
+    const relayId = homeRelayId;
+    void (async () => {
+      try {
+        const ads = await api.ads("home", relayId);
+        homeAd = ads[0] ?? null;
+      } catch {
+        homeAd = null;
+      }
+    })();
+  });
 </script>
 
 <section class="home">
   <header class="hero">
-    <Hop state={st.state} size={48} dark={app.dark} label={t(lang, `state.${st.state}`)} />
-    <h1 class="h2" aria-live="polite">{t(lang, `state.${st.state}`)}</h1>
+    <div class="brand">
+      <Hop state={st.state} size={40} dark={app.dark} label={t(lang, `state.${st.state}`)} />
+      <span class="logotype">{t(lang, "app.name")}</span>
+    </div>
+    <h1 class="h2 status" aria-live="polite">{t(lang, `state.${st.state}`)}</h1>
     {#if connected && st.viaRelay}
+      <span class="badge relay">{relayBadge}</span>
       <p class="mono muted via">{t(lang, "home.viaRelay", { name: st.viaRelay })}</p>
-    {:else if connected && st.carrier}
-      <p class="mono muted via">{st.carrier}{#if st.country || flagCC} · {st.country || flagCC}{/if}</p>
     {/if}
   </header>
+
+  {#if uptime}
+    <p class="mono muted uptime" aria-live="polite">{uptime}</p>
+  {/if}
 
   <ConnectButton
     state={st.state}
@@ -107,19 +173,26 @@
   <Problem />
 
   <div class="ip mono center" aria-live="polite">
-    <div class="ip-head">
-      <span class="caption muted">{ipLabel}</span>
+    <span class="caption muted">{ipLabel}</span>
+    <div class="ip-row">
+      <span class="small ip-addr">{ipValue}</span>
       {#if ipTone !== "idle"}
         <span class="badge" class:safe={ipTone === "safe"} class:unsafe={ipTone === "unsafe"} class:warn={ipTone === "warn"}>{badgeLabel}</span>
       {/if}
     </div>
-    <span class="small ip-addr">{ipValue}</span>
-    {#if flagCC && (connected || busy)}
-      <span class="caption muted ip-meta">{flagEmoji(flagCC)} {flagCC}</span>
+    {#if sessionPing || (connected && st.carrier)}
+      <div class="ip-row ping-row">
+        {#if sessionPing}
+          <span class="caption muted">{t(lang, "home.ping")} · {sessionPing}</span>
+        {/if}
+        {#if connected && st.carrier}
+          <span class="badge safe proto" title={st.carrier}>{st.carrier}</span>
+        {/if}
+      </div>
     {/if}
   </div>
 
-  <button class="server card" class:auto-on={auto} onclick={() => (app.pickerOpen = true)} disabled={app.servers.length === 0}>
+  <button class="server card" class:auto-on={auto} onclick={() => void openPicker()} disabled={app.servers.length === 0}>
     {#if auto}
       <span class="flag auto" aria-hidden="true"><Icon name="route" size={22} /></span>
       <span class="name">
@@ -132,7 +205,7 @@
       </span>
       <span class="meta mono muted">{selected?.latencyMs ? formatLatency(selected.latencyMs, lang) : "·"}</span>
     {:else}
-      <span class="flag" aria-hidden="true">{flagEmoji(flagCC) || "·"}</span>
+      <Flag cc={flagCC} />
       <span class="name">
         <span class="small">{selected ? selected.name : t(lang, "servers.empty")}</span>
         {#if flagCC}<span class="caption muted">{flagCC}</span>{/if}
@@ -140,6 +213,10 @@
       <span class="meta mono muted">{selected?.latencyMs ? formatLatency(selected.latencyMs, lang) : "-"}</span>
     {/if}
   </button>
+
+  <div class="ad-dock">
+    <AdSlot ad={homeAd} />
+  </div>
 </section>
 
 {#if app.pickerOpen}
@@ -150,6 +227,9 @@
         <h2 class="title">{t(lang, "home.pickServer")}</h2>
         <button class="btn quiet compact" onclick={() => (app.pickerOpen = false)}>{t(lang, "action.back")}</button>
       </header>
+      {#if probing}
+        <p class="caption muted probe">{t(lang, "servers.probing")}</p>
+      {/if}
       <ul class="list" role="radiogroup" aria-label={t(lang, "home.pickServer")}>
         <li>
           <button role="radio" aria-checked={auto} class="row" class:picked={auto} onclick={pickAuto}>
@@ -166,7 +246,7 @@
           <li>
             <button role="radio" aria-checked={!!app.settings.pin && n.ids.includes(app.settings.pin)} class="row" class:picked={!!app.settings.pin && n.ids.includes(app.settings.pin)} onclick={() => pick(n.id)}>
               <span class="mark" class:sel={!!app.settings.pin && n.ids.includes(app.settings.pin)}></span>
-              <span class="flag" aria-hidden="true">{flagEmoji(n.country) || "·"}</span>
+              <Flag cc={n.country} />
               <span class="name">
                 <span class="small">{n.name}</span>
                 {#if n.active}<span class="caption live"><span class="dot" aria-hidden="true"></span>{t(lang, "servers.active")}</span>
@@ -184,23 +264,38 @@
 <style>
   .home {
     display: flex; flex-direction: column; align-items: center; gap: var(--dot-space-5);
-    padding: var(--dot-space-6) var(--dot-space-4) var(--dot-space-5);
+    min-height: 100%;
+    padding: var(--dot-space-6) var(--dot-space-4) var(--dot-space-4);
     background:
       radial-gradient(80% 50% at 50% -10%, color-mix(in srgb, var(--dot-fg) 5%, transparent), transparent 70%);
   }
   .home > :global(.problem),
   .home > .server,
-  .home > .ip { align-self: stretch; width: 100%; }
+  .home > .ip,
+  .home > .ad-dock { align-self: stretch; width: 100%; }
+  .ad-dock { margin-top: auto; padding-top: var(--dot-space-3); }
   .hero { display: flex; flex-direction: column; align-items: center; gap: var(--dot-space-2); text-align: center; }
+  .brand {
+    display: flex; align-items: center; justify-content: center; gap: var(--dot-space-3);
+  }
+  .logotype {
+    font: 600 22px / 1.1 var(--dot-font-sans);
+    letter-spacing: -0.03em;
+    color: var(--dot-fg);
+  }
+  .status { margin: 0; }
   .via { margin: 0; font-size: 12px; }
+  .uptime { margin: 0; font-size: 18px; letter-spacing: 0.04em; font-variant-numeric: tabular-nums; }
+  .probe { padding: var(--dot-space-2) var(--dot-space-4); margin: 0; }
   .center { text-align: center; }
   .err { overflow-wrap: anywhere; font-size: 12px; }
   .ip {
     display: flex; flex-direction: column; align-items: center; gap: 4px; margin: 0;
   }
-  .ip-head { display: flex; align-items: center; justify-content: center; gap: var(--dot-space-2); }
+  .ip-row { display: flex; align-items: center; justify-content: center; gap: var(--dot-space-2); flex-wrap: wrap; }
+  .ping-row { margin-top: 2px; }
   .ip-addr { letter-spacing: 0.01em; }
-  .ip-meta { max-width: 22rem; text-align: center; overflow-wrap: anywhere; }
+  .badge.proto { text-transform: none; letter-spacing: 0.01em; font-family: var(--dot-font-mono); }
   .badge {
     display: inline-flex; align-items: center; min-height: 20px; padding: 0 8px;
     border-radius: var(--dot-radius-pill); font: 600 11px / 1 var(--dot-font-sans);
@@ -214,6 +309,9 @@
   }
   .badge.safe {
     color: #1a2e05; background: var(--dot-signal);
+  }
+  .badge.relay {
+    color: var(--dot-fg); background: var(--dot-surface-2); border: 1px solid var(--dot-border);
   }
   .server {
     display: flex; align-items: center; gap: var(--dot-space-3); width: 100%;

@@ -95,14 +95,23 @@ func (c *Client) Disconnect(ctx context.Context) error {
 	return c.call(ctx, MethodDisconnect, nil, nil)
 }
 
-// ImportInvite saves a dotvpn:// invite as the active account.
-func (c *Client) ImportInvite(ctx context.Context, uri string) error {
-	return c.call(ctx, MethodImport, uri, nil)
+// ImportInvite saves a dv:// invite as the active account.
+func (c *Client) ImportInvite(ctx context.Context, uri string) (r ImportResult, err error) {
+	return r, c.call(ctx, MethodImport, uri, &r)
 }
 
 // Servers lists the ladder.
 func (c *Client) Servers(ctx context.Context) (sv []Server, err error) {
 	return sv, c.call(ctx, MethodServers, nil, &sv)
+}
+
+// ProbeServers dials each ladder rung once and returns servers with latency.
+func (c *Client) ProbeServers(ctx context.Context) (sv []Server, err error) {
+	cc := *c
+	if cc.Timeout == 0 || cc.Timeout < 20*time.Second {
+		cc.Timeout = 25 * time.Second
+	}
+	return sv, cc.call(ctx, MethodProbe, nil, &sv)
 }
 
 // Settings returns the helper settings.
@@ -128,7 +137,12 @@ func (c *Client) Relays(ctx context.Context) (rs []Relay, err error) {
 	return rs, c.call(ctx, MethodRelays, nil, &rs)
 }
 
-// AddRelay opts into a community/private relay by id or dotvpn-relay:// URI.
+// Ads fetches active ads for a client slot (home|relay).
+func (c *Client) Ads(ctx context.Context, slot, relayID string) (ads []Ad, err error) {
+	return ads, c.call(ctx, MethodAds, map[string]string{"slot": slot, "relayId": relayID}, &ads)
+}
+
+// AddRelay opts into a community/private relay by id or dvr:// URI.
 func (c *Client) AddRelay(ctx context.Context, idOrURI string) error {
 	return c.call(ctx, MethodAddRelay, idOrURI, nil)
 }

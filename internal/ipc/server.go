@@ -120,9 +120,11 @@ func (s *server) call(req request) (any, error) {
 		if err := json.Unmarshal(req.Params, &uri); err != nil {
 			return nil, Coded(CodeBadInvite, errors.New("invite must be a string"))
 		}
-		return nil, b.ImportInvite(uri)
+		return b.ImportInvite(uri)
 	case MethodServers:
 		return b.Servers(), nil
+	case MethodProbe:
+		return b.ProbeServers()
 	case MethodGetSettings:
 		return b.Settings(), nil
 	case MethodSetSettings:
@@ -137,6 +139,17 @@ func (s *server) call(req request) (any, error) {
 		return b.Account()
 	case MethodRelays:
 		return b.Relays()
+	case MethodAds:
+		var p struct {
+			Slot    string `json:"slot"`
+			RelayID string `json:"relayId"`
+		}
+		if len(req.Params) > 0 {
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				return nil, err
+			}
+		}
+		return b.Ads(p.Slot, p.RelayID)
 	case MethodAddRelay:
 		var id string
 		if err := json.Unmarshal(req.Params, &id); err != nil {
