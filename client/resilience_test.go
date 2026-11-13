@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/payam-foundation/dotvpn-wire/transport"
+	"github.com/payam-foundation/dotvpn-wire/transport/reverse"
 )
 
 // httpSession answers every stream like a web server returning status.
@@ -190,5 +191,82 @@ func TestProbeRanksFastestAndDropsDead(t *testing.T) {
 	r := Probe(context.Background(), eps, map[transport.Kind]transport.Dialer{transport.KindH2: d}, func() string { return "t" }, DefaultProbeTarget, 2)
 	if len(r) != 2 || r[0].Endpoint.Addr != "fast:443" || r[1].Endpoint.Addr != "slow:443" {
 		t.Fatalf("ranked = %+v", r)
+	}
+}
+
+// Tiered racing must pick healthy direct edge first without ever dialling relays.
+func TestTieredRacingPrefersDirectOverRelay(t *testing.T) {
+	var relayDialed atomic.Bool
+	d := dialerFunc(func(_ context.Context, ep transport.Endpoint) (transport.Session, error) {
+		if ep.Kind == reverse.KindReverse {
+			relayDialed.Store(true)
+			return nil, errors.New("relay should not be touched")
+		}
+		return httpSession{"204 No Content"}, nil
+	})
+	e := NewEngine(EngineConfig{
+		Endpoints: []transport.Endpoint{
+			{Kind: reverse.KindReverse, Addr: "relay.example.com:443"},
+			{Kind: transport.KindH2, Addr: "direct.example.com:443"},
+		},
+		Dialers: map[transport.Kind]transport.Dialer{
+			transport.KindH2:    d,
+			reverse.KindReverse: d,
+		},
+		Token:       func() string { return "t" },
+		Stagger:     5 * time.Millisecond,
+		ProbeTarget: DefaultProbeTarget,
+	})
+	defer e.Close()
+	c, err := e.DialContext(context.Background(), "tcp", "example.com:443")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = c.Close()
+	if relayDialed.Load() {
+		t.Fatal("direct was healthy but relay was dialed")
+	}
+	if got := e.Status(); got != "h2@direct.example.com:443" {
+		t.Fatalf("status = %q, want direct.example.com:443", got)
+	}
+}
+
+// Tiered racing must fall back to relays when direct edge carriers fail.
+func TestTieredRacingFallsBackToRelay(t *testing.T) {
+	var relayDialed atomic.Bool
+	d := dialerFunc(func(_ context.Context, ep transport.Endpoint) (transport.Session, error) {
+		if ep.Kind == transport.KindH2 {
+			return nil, errors.New("direct connection blocked")
+		}
+		if ep.Kind == reverse.KindReverse {
+			relayDialed.Store(true)
+			return httpSession{"204 No Content"}, nil
+		}
+		return nil, errors.New("unexpected carrier")
+	})
+	e := NewEngine(EngineConfig{
+		Endpoints: []transport.Endpoint{
+			{Kind: transport.KindH2, Addr: "blocked-direct.example.com:443"},
+			{Kind: reverse.KindReverse, Addr: "active-relay.example.com:443"},
+		},
+		Dialers: map[transport.Kind]transport.Dialer{
+			transport.KindH2:    d,
+			reverse.KindReverse: d,
+		},
+		Token:       func() string { return "t" },
+		Stagger:     5 * time.Millisecond,
+		ProbeTarget: DefaultProbeTarget,
+	})
+	defer e.Close()
+	c, err := e.DialContext(context.Background(), "tcp", "example.com:443")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = c.Close()
+	if !relayDialed.Load() {
+		t.Fatal("direct failed but relay fallback was never dialed")
+	}
+	if got := e.Status(); got != "reverse@active-relay.example.com:443" {
+		t.Fatalf("status = %q, want reverse@active-relay.example.com:443", got)
 	}
 }

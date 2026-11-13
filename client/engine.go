@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/payam-foundation/dotvpn-wire/transport"
+	"github.com/payam-foundation/dotvpn-wire/transport/reverse"
 )
 
 // EngineConfig configures an Engine.
@@ -452,8 +453,8 @@ type attempt struct {
 	err error
 }
 
-// race connects along the ladder happy-eyeballs style: rung N+1 starts when
-// the Stagger delay passes or rung N fails, first established session wins.
+// race connects along the ladder in two tiers (direct edge first, in-country
+// relays second), happy-eyeballs style within each tier.
 func (e *Engine) race(ctx context.Context) (transport.Session, transport.Endpoint, error) {
 	order := e.arrange(e.expand(ctx, true))
 	if len(order) == 0 {
@@ -462,9 +463,48 @@ func (e *Engine) race(ctx context.Context) (transport.Session, transport.Endpoin
 	if s, ep, ok := e.fastPath(ctx, order); ok {
 		return s, ep, nil
 	}
-	rctx, cancel := context.WithCancel(ctx)
+
+	var direct, relays []transport.Endpoint
+	for _, ep := range order {
+		if ep.Kind == reverse.KindReverse || ep.Kind == reverse.KindDNS {
+			relays = append(relays, ep)
+		} else {
+			direct = append(direct, ep)
+		}
+	}
+
+	// Phase 1: Direct edge carriers (300ms stagger, max 2.5s budget before relay fallback).
+	if len(direct) > 0 {
+		directBudget := 2500 * time.Millisecond
+		if len(relays) == 0 {
+			directBudget = 0 // no relays to fall back to; direct owns the entire context
+		}
+		s, ep, err := e.raceTier(ctx, direct, 300*time.Millisecond, directBudget, len(direct))
+		if err == nil {
+			return s, ep, nil
+		}
+		e.cfg.Log.Debug("direct tier failed or timed out", "err", err)
+	}
+
+	// Phase 2: In-country relays (750ms stagger, max 2 concurrent attempts).
+	if len(relays) > 0 {
+		return e.raceTier(ctx, relays, 750*time.Millisecond, 0, 2)
+	}
+
+	return nil, transport.Endpoint{}, errors.New("client: all endpoints failed")
+}
+
+func (e *Engine) raceTier(ctx context.Context, tier []transport.Endpoint, stagger time.Duration, budget time.Duration, maxConc int) (transport.Session, transport.Endpoint, error) {
+	tctx := ctx
+	var cancelBudget context.CancelFunc
+	if budget > 0 {
+		tctx, cancelBudget = context.WithTimeout(ctx, budget)
+		defer cancelBudget()
+	}
+	rctx, cancel := context.WithCancel(tctx)
 	defer cancel()
-	results := make(chan attempt, len(order))
+
+	results := make(chan attempt, len(tier))
 	launch := func(ep transport.Endpoint) {
 		go func() {
 			s, err := e.dialVerified(rctx, ep)
@@ -474,20 +514,21 @@ func (e *Engine) race(ctx context.Context) (transport.Session, transport.Endpoin
 
 	launched, received := 0, 0
 	next := func() {
-		if launched < len(order) {
-			launch(order[launched])
+		if launched < len(tier) && (maxConc <= 0 || (launched-received) < maxConc) {
+			launch(tier[launched])
 			launched++
 		}
 	}
+
 	next()
-	timer := time.NewTimer(e.cfg.Stagger)
+	timer := time.NewTimer(stagger)
 	defer timer.Stop()
 	var errs []error
 	for {
 		select {
 		case <-timer.C:
 			next()
-			timer.Reset(e.cfg.Stagger)
+			timer.Reset(stagger)
 		case r := <-results:
 			received++
 			if r.err == nil {
@@ -506,13 +547,11 @@ func (e *Engine) race(ctx context.Context) (transport.Session, transport.Endpoin
 			e.mu.Unlock()
 			e.persistCool()
 			errs = append(errs, fmt.Errorf("%s: %w", r.ep.Label(), r.err))
-			if received == len(order) {
-				return nil, transport.Endpoint{}, fmt.Errorf("client: all endpoints failed: %w", errors.Join(errs...))
+			if received == len(tier) {
+				return nil, transport.Endpoint{}, fmt.Errorf("tier failed: %w", errors.Join(errs...))
 			}
-			if received == launched {
-				next()
-			}
-		case <-ctx.Done():
+			next()
+		case <-tctx.Done():
 			go func(pending int) {
 				for range pending {
 					if l := <-results; l.s != nil {
@@ -520,7 +559,13 @@ func (e *Engine) race(ctx context.Context) (transport.Session, transport.Endpoin
 					}
 				}
 			}(launched - received)
-			return nil, transport.Endpoint{}, ctx.Err()
+			if ctx.Err() != nil {
+				return nil, transport.Endpoint{}, ctx.Err()
+			}
+			if len(errs) > 0 {
+				return nil, transport.Endpoint{}, errors.Join(append(errs, tctx.Err())...)
+			}
+			return nil, transport.Endpoint{}, tctx.Err()
 		}
 	}
 }
