@@ -36,7 +36,7 @@ cd desktop && CGO_ENABLED=1 GOWORK=off go build ./... && GOWORK=off go test ./..
 
 ## Docs
 
-`docs/adr/`: ADR-009, ADR-010 (GUI and helper). Security report: `../dotvpn-lab/docs/REPORT.md`.
+Design notes (GUI, helper, netstack): README.
 
 ## Flow
 

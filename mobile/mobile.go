@@ -1,4 +1,4 @@
-// Package mobile is the gomobile surface of the client (ADR-019). The Android
+// Package mobile is the gomobile surface of the client (ADR-025). The Android
 // VpnService owns the TUN device, routes, DNS and kill switch; this package
 // runs the engine and the gVisor front on the descriptor it hands over.
 //
