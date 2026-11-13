@@ -5,7 +5,7 @@
 // names are resolved by the node, never by a local (poisonable) resolver.
 //
 // UDP other than DNS (QUIC, STUN, games, VoIP) goes through Config.Packet, one
-// framed tunnel stream per flow (ADR-018), or straight out for direct
+// framed tunnel stream per flow (ADR-009), or straight out for direct
 // destinations. Without Config.Packet it is dropped, which makes browsers fall
 // back to TCP; nothing UDP ever leaves the physical interface unrouted.
 //

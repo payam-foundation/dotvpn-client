@@ -85,7 +85,7 @@ GOWORK=off CGO_ENABLED=1 go run .
 
 Without the helper the window shows setup. To try the UI without any helper, run `pnpm exec vite build --mode mock && pnpm exec vite preview --outDir dist-mock --port 4173` in `frontend/` (mock data, opens at `http://localhost:4173`). Stop the app with `pkill dotvpn-desktop` or Ctrl-C.
 
-On macOS, notifications work only from a signed `.app` bundle. A bare binary runs without them. On GNOME, tray icons need the AppIndicator extension; without it the window stays open and Settings says so. Design: [ADR-010](docs/adr/010-desktop-gui-helper.md).
+On macOS, notifications work only from a signed `.app` bundle. A bare binary runs without them. On GNOME, tray icons need the AppIndicator extension; without it the window stays open and Settings says so. The GUI is unprivileged; a service installed once (launchd, systemd, Windows service) owns the tunnel and kill switch, so both outlive the window.
 
 ### Manual verification (Windows and Linux)
 
@@ -127,7 +127,7 @@ In full-tunnel mode the client defends against the usual leaks. Each guard is a 
 - **Kill switch.** Default deny. Only the tunnel endpoint may leave the device, so a dead tunnel or node cannot silently fall back to your real connection.
 - **DNS.** Queries are answered by a local fake DNS and resolved inside the tunnel. The system resolver is not used.
 - **IPv6.** Blackholed, so it cannot bypass the tunnel.
-- **STUN and WebRTC.** Non-DNS UDP is dropped unless the server advertises UDP over the tunnel (`udp=1`, [ADR-018](https://github.com/payam-foundation/dotvpn-wire/blob/main/docs/adr/018-udp-over-tunnel-streams.md)), in which case it rides the tunnel.
+- **STUN and WebRTC.** Non-DNS UDP is dropped unless the server advertises UDP over the tunnel (`udp=1`), in which case it rides the tunnel.
 - **Bypass sockets.** The client's own sockets are pinned to the physical interface so the tunnel cannot capture itself.
 
 If the client crashes with the kill switch on, run `dotvpn -unblock` before anything else.
@@ -140,7 +140,7 @@ The config is YAML, written by `-invite`. These keys matter most.
 |---|---|
 | `listen` | Local proxy address. Default `127.0.0.1:1080`. |
 | `listen_auth` / `listen_auth_file` | `user:pass` for the local proxy. Required for a non-loopback `listen`. |
-| `ech` (endpoint parameter) | `auto` tries ECH and falls back to GREASE; `require` fails closed; or a base64 ECHConfigList. See [ADR-017](https://github.com/payam-foundation/dotvpn-wire/blob/main/docs/adr/017-ech-policy.md). |
+| `ech` (endpoint parameter) | `auto` tries ECH and falls back to GREASE; `require` fails closed; or a base64 ECHConfigList. Configs are fetched over DNS-over-HTTPS to pinned resolver IPs. |
 | `probe_target` | `host:port` fetched through each new session (`/generate_204`) before it counts as connected. `off` disables. |
 | `state_file` | Persists the last good endpoint, no secrets. `off` disables. |
 | `upstream_proxy` | `socks5://` or `http://` URL for TCP carriers. HTTP/3 is skipped. |
@@ -184,7 +184,7 @@ go test -race -count=1 ./...
 GOOS=android GOARCH=arm64 go vet ./...   # mobile build tags
 ```
 
-`go.mod` pins an exact `dotvpn-wire` tag. For side-by-side work with a sibling checkout use an untracked `go.work` in the parent directory (see CONTRIBUTING.md). CI tests against the pinned wire tag and wire `main`. TUN, kill switch and censor behaviour are exercised end to end by [dotvpn-lab](https://github.com/payam-foundation/dotvpn-lab). The client never imports core or relay. Design: [ADR-009](docs/adr/009-gvisor-netstack.md), [ADR-010](docs/adr/010-desktop-gui-helper.md).
+`go.mod` pins an exact `dotvpn-wire` tag. For side-by-side work with a sibling checkout use an untracked `go.work` in the parent directory (see CONTRIBUTING.md). CI tests against the pinned wire tag and wire `main`. TUN, kill switch and censor behaviour are exercised end to end by [dotvpn-lab](https://github.com/payam-foundation/dotvpn-lab). The client never imports core or relay. TCP terminates in a user-space gVisor stack fed by the TUN device, so one implementation serves macOS, Linux and Windows.
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) first. Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 
@@ -196,7 +196,7 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) first. Report vulnerabilities as describ
 | [dotvpn-core](https://github.com/payam-foundation/dotvpn-core) | Server: node, control plane |
 | [dotvpn-relay](https://github.com/payam-foundation/dotvpn-relay) | In-country stealth hop |
 | [dotvpn-android](https://github.com/payam-foundation/dotvpn-android) | Android app |
-| [dotvpn-lab](https://github.com/payam-foundation/dotvpn-lab) | Censorship lab, architecture and ADR index |
+| [dotvpn-lab](https://github.com/payam-foundation/dotvpn-lab) | Censorship lab and black-box tests |
 
 ## License
 
