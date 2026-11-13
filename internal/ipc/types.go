@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package ipc is the contract between the privileged helper (dotvpn daemon)
 // and its unprivileged clients, the desktop app and the CLI. This file holds
 // the wire types; the protocol, server and client are beside it.
@@ -49,7 +51,7 @@ type Status struct {
 	// ViaRelayID is the control-plane relay id for ad/slot lookups (Params["relay_id"]).
 	ViaRelayID string    `json:"viaRelayId,omitempty"`
 	LatencyMS  int       `json:"latencyMs,omitempty"`
-	Since        time.Time `json:"since,omitzero"`
+	Since      time.Time `json:"since,omitzero"`
 	// ExitIP is the probed public address through the tunnel, when known.
 	ExitIP string `json:"exitIp,omitempty"`
 	// PublicIP is the device's current public address (direct), when known.
@@ -157,8 +159,18 @@ type Settings struct {
 	CrashReporting bool `json:"crashReporting"`
 }
 
-// ReportResult is the outcome of Send diagnostics.
+// BuildReportParams asks the helper for a report. With Preview the result
+// carries only the plaintext, so one reply never holds both (maxLine).
+type BuildReportParams struct {
+	WindowMin int    `json:"windowMin"` // 30 or 60
+	Note      string `json:"note,omitempty"`
+	Preview   bool   `json:"preview,omitempty"`
+}
+
+// ReportResult is a built report. Blob is the sealed file content (base64 on
+// the wire); Preview is what the blob would contain, shown before sending.
 type ReportResult struct {
-	IssueURL string `json:"issueUrl"`
-	Via      string `json:"via"` // control | browser
+	ID      string `json:"id"`
+	Blob    []byte `json:"blob,omitempty"`
+	Preview string `json:"preview,omitempty"`
 }

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package ipc
 
 import (
@@ -152,9 +154,9 @@ func (c *Client) RemoveRelay(ctx context.Context, id string) error {
 	return c.call(ctx, MethodRemoveRelay, id, nil)
 }
 
-// ReportDiagnostics submits a scrubbed support bundle via the helper.
-func (c *Client) ReportDiagnostics(ctx context.Context) (r ReportResult, err error) {
-	err = c.call(ctx, MethodReport, nil, &r)
+// BuildReport asks the helper to seal its recent scrubbed logs.
+func (c *Client) BuildReport(ctx context.Context, p BuildReportParams) (r ReportResult, err error) {
+	err = c.call(ctx, MethodBuildReport, p, &r)
 	return
 }
 

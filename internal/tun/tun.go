@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package tun is the full-tunnel client front. It reads IP packets from a TUN
 // device, terminates every TCP flow in a user-space gVisor stack, and sends the
 // payload through the transport (or straight out of the physical interface for

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package main
 
 import (
@@ -15,6 +17,7 @@ import (
 
 	"github.com/payam-foundation/dotvpn-client/internal/helper"
 	"github.com/payam-foundation/dotvpn-client/internal/ipc"
+	"github.com/payam-foundation/dotvpn-client/internal/report"
 	"github.com/payam-foundation/dotvpn-client/internal/service"
 )
 
@@ -22,7 +25,8 @@ const usage = `usage: dotvpn <command>
 
   connect | disconnect | status      drive the helper
   import <dv://...>              save an invite in the helper
-  report                             send diagnostics (control or browser)
+  report [--window 60m] [--note TEXT] --out FILE
+                                     write an encrypted report to email to report@dotvpn.org
   service install|uninstall|status   manage the helper (needs root/Administrator to change)
   daemon                             run the helper (the service runs this)
   version
@@ -74,7 +78,7 @@ func daemonCmd(ctx context.Context, args []string) error {
 	if *verbose {
 		lvl = slog.LevelDebug
 	}
-	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: lvl}))
+	log := report.Tee(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: lvl}))
 	slog.SetDefault(log)
 	runHelper := func(ctx context.Context) error {
 		helper.AppVersion = version
@@ -175,12 +179,7 @@ func clientCmd(ctx context.Context, name string, args []string) error {
 		_, err := c.ImportInvite(ctx, args[0])
 		return helperErr(err)
 	case "report":
-		r, err := c.ReportDiagnostics(ctx)
-		if err != nil {
-			return helperErr(err)
-		}
-		fmt.Printf("%s (%s)\n", r.IssueURL, r.Via)
-		return nil
+		return reportCmd(ctx, c, args)
 	}
 	ev, err := c.Subscribe(ctx)
 	if err != nil {
@@ -241,4 +240,27 @@ func helperErr(err error) error {
 		return fmt.Errorf("cannot reach the helper (%w); run `sudo dotvpn service install`", err)
 	}
 	return err
+}
+
+// reportCmd asks the helper for a sealed report and writes it to --out.
+func reportCmd(ctx context.Context, c *ipc.Client, args []string) error {
+	fs := flag.NewFlagSet("report", flag.ContinueOnError)
+	window := fs.Duration("window", time.Hour, "log window, 30m or 60m")
+	note := fs.String("note", "", "what went wrong (max 1 KB, sealed with the report)")
+	out := fs.String("out", "", "file to write")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *out == "" {
+		return errors.New("report: --out FILE is required")
+	}
+	r, err := c.BuildReport(ctx, ipc.BuildReportParams{WindowMin: int(window.Minutes()), Note: *note})
+	if err != nil {
+		return helperErr(err)
+	}
+	if err := os.WriteFile(*out, r.Blob, 0o600); err != nil {
+		return err
+	}
+	fmt.Printf("wrote %s (report %s); email it to %s\n", *out, r.ID, report.Address)
+	return nil
 }

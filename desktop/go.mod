@@ -5,6 +5,7 @@ go 1.27.4
 require (
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/payam-foundation/dotvpn-client v0.0.0
+	github.com/payam-foundation/log-decypher v0.1.0
 	github.com/wailsapp/wails/v3 v3.1.0
 )
 
@@ -16,7 +17,7 @@ require (
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	golang.org/x/image v0.45.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
-	golang.org/x/term v0.46.0 // indirect
+	golang.org/x/term v0.47.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 )
 

@@ -77,6 +77,7 @@ require (
 	github.com/getsentry/sentry-go v0.50.0
 	github.com/miekg/dns v1.1.73
 	github.com/payam-foundation/dotvpn-wire v0.5.0
+	github.com/payam-foundation/log-decypher v0.1.0
 	golang.org/x/mobile v0.0.0-20261011034528-197770444867
 	golang.org/x/sys v0.49.0
 	golang.zx2c4.com/wireguard v0.0.0-20261024220952-b3bc704ef0ee

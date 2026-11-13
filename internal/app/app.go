@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package app builds the client Engine from a Config. The CLI and the mobile
 // binding share it, so both speak the same carriers and follow the same rules.
 package app
