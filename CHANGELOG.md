@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/payam-foundation/dotvpn-client/compare/v0.3.0...v0.4.0) (2026-11-13)
+
+
+### Features
+
+* diagnostics, relay screen, ad slot, account helper and device seats ([#17](https://github.com/payam-foundation/dotvpn-client/issues/17)) ([3ce407d](https://github.com/payam-foundation/dotvpn-client/commit/3ce407d7f09830a2e75fc0ea7cde8dd6251840a4))
+
 ## [0.3.0](https://github.com/payam-foundation/dotvpn-client/compare/v0.2.0...v0.3.0) (2026-11-09)
 
 
