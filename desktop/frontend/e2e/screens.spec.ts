@@ -84,7 +84,7 @@ for (const theme of ["light", "dark"] as const) {
       await expect(page.getByText("Relay DE")).toBeVisible();
       await page.getByRole("button", { name: "Back" }).first().click();
       await page.getByRole("button", { name: /Private relays/ }).click();
-      await expect(page.getByText("Friends NL")).toBeVisible();
+      await expect(page.getByText("Home Relay")).toBeVisible();
       await page.getByRole("button", { name: "Back" }).first().click();
       await page.getByRole("button", { name: "Settings" }).click();
       await page.getByRole("tab", { name: "Connection" }).click();
