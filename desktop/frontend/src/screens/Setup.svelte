@@ -62,7 +62,6 @@
       <h1 class="h2">{t(lang, "first.inviteTitle")}</h1>
       <p class="small muted">{t(lang, "first.inviteBody")}</p>
     </div>
-    <Problem />
     <div class="form"><InviteForm ondone={() => (app.view = "home")} /></div>
   {/if}
 </section>

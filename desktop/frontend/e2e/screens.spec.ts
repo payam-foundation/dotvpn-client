@@ -235,7 +235,7 @@ test.describe("Persian", () => {
   test("invite field stays LTR", async ({ page }) => {
     await open(page, "lang=fa&state=off");
     await page.getByRole("button", { name: "حساب" }).click();
-    await page.getByRole("button", { name: "افزودن دعوت‌نامه" }).click();
+    await page.getByRole("button", { name: "جایگزینی حساب" }).click();
     await expect(page.getByLabel("لینک دعوت")).toHaveAttribute("dir", "ltr");
   });
 });
