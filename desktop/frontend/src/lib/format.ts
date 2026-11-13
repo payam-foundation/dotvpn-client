@@ -39,7 +39,7 @@ export function formatLatency(ms: number, lang: Lang): string {
   return `${digits(ms, lang)} ${t(lang, "unit.ms")}`;
 }
 
-/** Keeps both ends of an invite visible: dotvpn://AbC…xYz. */
+/** Keeps both ends of an invite visible: dv://AbC…xYz. */
 export function middleTruncate(s: string, max = 36): string {
   if (s.length <= max) return s;
   const keep = max - 1;

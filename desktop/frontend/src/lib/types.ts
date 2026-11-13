@@ -11,6 +11,8 @@ export interface Status {
   server?: string;
   country?: string;
   viaRelay?: string;
+  viaRelayTier?: string;
+  viaRelayId?: string;
   latencyMs?: number;
   since?: string;
   exitIp?: string;
@@ -36,7 +38,9 @@ export interface Server {
 
 export interface Account {
   name: string;
+  package?: string;
   quotaLimit: number;
+  quotaUsed: number;
   quotaRemaining: number;
   quotaReset?: string;
   expires?: number;
@@ -46,13 +50,31 @@ export interface Account {
   disabled: boolean;
 }
 
+export interface Ad {
+  id: string;
+  issuer: string;
+  relayId?: string;
+  format: string;
+  imageUrl?: string;
+  iconUrl?: string;
+  title?: string;
+  desc?: string;
+  link?: string;
+}
+
 export interface Relay {
   id: string;
   name: string;
   country?: string;
   tier: string;
   health: string;
+  invite?: string;
+  public: boolean;
   optedIn: boolean;
+}
+
+export interface ImportResult {
+  needsRelay?: boolean;
 }
 
 export interface Settings {
@@ -64,9 +86,16 @@ export interface Settings {
   /** Host resolver Dot VPN sees when preset is system (read-only). */
   systemDns?: string;
   pin?: string;
+  useRelays: boolean;
   carriers?: string[];
   directDomains: string[];
   directCidrs: string[];
+  crashReporting?: boolean;
+}
+
+export interface ReportResult {
+  issueUrl: string;
+  via: string;
 }
 
 export type Lang = "en" | "fa";
@@ -113,14 +142,17 @@ export const emptySettings: Settings = {
   dns: "",
   dnsPreset: "cloudflare",
   doh: false,
+  useRelays: false,
   carriers: [],
   directDomains: [],
   directCidrs: [],
+  crashReporting: false,
 };
 
 export const emptyAccount: Account = {
   name: "",
   quotaLimit: 0,
+  quotaUsed: 0,
   quotaRemaining: 0,
   maxDevices: 0,
   disabled: false,

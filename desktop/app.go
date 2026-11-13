@@ -20,13 +20,13 @@ var version = "dev"
 
 const (
 	uniqueID   = "org.dotvpn.desktop"
-	inviteLink = "dotvpn://"
+	inviteLink = "dv://"
 	// backgroundFlag is what the OS login item passes so the app starts in
 	// the tray instead of in front of the user.
 	backgroundFlag = "--background"
 )
 
-// InviteResult is the outcome of importing a dotvpn:// link the OS handed us.
+// InviteResult is the outcome of importing a dv:// link the OS handed us.
 type InviteResult struct {
 	OK      bool   `json:"ok"`
 	Code    string `json:"code,omitempty"`
@@ -169,15 +169,17 @@ func (d *desktop) hideWindow() {
 
 func (d *desktop) trayOK() bool { return d.tray.supported }
 
-// handleInvite imports a dotvpn:// link the OS opened us with and shows the
+// handleInvite imports a dv:// link the OS opened us with and shows the
 // result, so clicking a link from a chat is the whole flow.
 func (d *desktop) handleInvite(uri string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	res := &InviteResult{OK: true}
-	if err := d.ipc.ImportInvite(ctx, uri); err != nil {
+	if r, err := d.ipc.ImportInvite(ctx, uri); err != nil {
 		he := toErr(err).(*helperError)
 		res = &InviteResult{Code: he.Code, Message: he.Message}
+	} else if r.NeedsRelay {
+		res = &InviteResult{OK: true, Code: "needs_relay"}
 	}
 	d.mu.Lock()
 	d.pending = res
@@ -194,7 +196,7 @@ func (d *desktop) takeInvite() *InviteResult {
 	return r
 }
 
-// inviteFrom picks the dotvpn:// link out of a command line.
+// inviteFrom picks the dv:// link out of a command line.
 func inviteFrom(args []string) string {
 	for _, a := range args {
 		if strings.HasPrefix(a, inviteLink) {

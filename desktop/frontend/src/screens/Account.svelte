@@ -2,6 +2,7 @@
   import { app } from "../lib/app.svelte";
   import { digits, formatBytes } from "../lib/format";
   import { t } from "../lib/i18n";
+  import Icon from "../components/Icon.svelte";
   import Problem from "../components/Problem.svelte";
 
   const lang = $derived(app.lang);
@@ -11,7 +12,11 @@
   const quotaLine = $derived.by(() => {
     if (!hasAccount) return "—";
     if (!a.quotaLimit) return t(lang, "account.unlimited");
-    return `${formatBytes(a.quotaRemaining || 0, lang)} / ${formatBytes(a.quotaLimit, lang)}`;
+    const used = Math.max(0, a.quotaUsed ?? 0);
+    return t(lang, "account.quotaUsedOf", {
+      used: formatBytes(used, lang),
+      limit: formatBytes(a.quotaLimit, lang),
+    });
   });
 
   const resetDays = $derived.by(() => {
@@ -37,6 +42,7 @@
 
 <section class="page">
   <header class="head">
+    <Icon name="account" size={22} />
     <h1 class="h3">{t(lang, "account.title")}</h1>
   </header>
   <Problem />
@@ -55,6 +61,10 @@
       <span class="small">{a.name?.trim() || "—"}</span>
     </div>
     <div class="row">
+      <span class="caption muted">{t(lang, "account.plan")}</span>
+      <span class="small">{a.package?.trim() || "—"}</span>
+    </div>
+    <div class="row">
       <span class="caption muted">{t(lang, "account.quota")}</span>
       <span class="small">{quotaLine}</span>
       {#if resetDays}<span class="caption muted">{resetDays}</span>{/if}
@@ -68,19 +78,19 @@
     <div class="row">
       <span class="caption muted">{t(lang, "account.devices")}</span>
       <span class="small">
-        {#if (a.maxDevices ?? 0) > 0}
-          {t(lang, "account.devicesOf", {
-            used: digits((a.devicesUsed && a.devicesUsed > 0 ? a.devicesUsed : 1), lang),
-            max: digits(a.maxDevices, lang),
-          })}
-        {:else}
+        {#if !hasAccount}
           —
+        {:else}
+          {t(lang, "account.devicesOf", {
+            used: digits(Math.max(0, a.devicesUsed ?? 0), lang),
+            max: (a.maxDevices ?? 0) > 0 ? digits(a.maxDevices, lang) : "∞",
+          })}
         {/if}
       </span>
     </div>
   </div>
 
-  <button class="btn primary block" onclick={() => { app.error = null; app.view = "invite"; }}>{t(lang, "action.import")}</button>
+  <button class="btn primary block" onclick={() => { app.error = null; app.view = "invite"; }}>{t(lang, app.status.configured ? "account.replace" : "action.import")}</button>
   {#if app.status.configured}
     <button class="btn quiet block" onclick={logout}>{t(lang, "account.logout")}</button>
   {/if}
@@ -95,7 +105,7 @@
     background:
       radial-gradient(70% 40% at 0% 0%, color-mix(in srgb, var(--dot-fg) 4%, transparent), transparent 65%);
   }
-  .head { display: flex; flex-direction: column; gap: var(--dot-space-1); }
+  .head { display: flex; align-items: center; gap: var(--dot-space-2); }
   .list { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
   .row {
     display: flex; flex-direction: column; gap: 2px;

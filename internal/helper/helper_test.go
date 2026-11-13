@@ -4,11 +4,15 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 
 	"github.com/payam-foundation/dotvpn-client/internal/config"
 	"github.com/payam-foundation/dotvpn-client/internal/ipc"
+	"github.com/payam-foundation/dotvpn-client/internal/product"
+	"github.com/payam-foundation/dotvpn-wire/discovery"
 	"github.com/payam-foundation/dotvpn-wire/invite"
 	"github.com/payam-foundation/dotvpn-wire/transport"
 )
@@ -36,10 +40,10 @@ func TestImportAndSettings(t *testing.T) {
 	if err := h.Connect(); !errors.Is(err, &ipc.Error{Code: ipc.CodeNotConfigured}) {
 		t.Fatalf("Connect before import = %v, want not_configured", err)
 	}
-	if err := h.ImportInvite("nope"); !errors.Is(err, &ipc.Error{Code: ipc.CodeBadInvite}) {
+	if _, err := h.ImportInvite("nope"); !errors.Is(err, &ipc.Error{Code: ipc.CodeBadInvite}) {
 		t.Fatalf("bad invite = %v", err)
 	}
-	if err := h.ImportInvite(testInvite()); err != nil {
+	if _, err := h.ImportInvite(testInvite()); err != nil {
 		t.Fatal(err)
 	}
 	if !h.Status().Configured {
@@ -51,7 +55,7 @@ func TestImportAndSettings(t *testing.T) {
 	if h.Status().Configured {
 		t.Fatal("still configured after logout")
 	}
-	if err := h.ImportInvite(testInvite()); err != nil {
+	if _, err := h.ImportInvite(testInvite()); err != nil {
 		t.Fatal(err)
 	}
 	sv := h.Servers()
@@ -84,10 +88,10 @@ func TestUnblock(t *testing.T) {
 
 func TestRelayOptInAndDNSSettings(t *testing.T) {
 	h, _ := newHelper(t)
-	if err := h.ImportInvite(testInvite()); err != nil {
+	if _, err := h.ImportInvite(testInvite()); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.AddRelay("dotvpn-relay://community-1"); err != nil {
+	if err := h.AddRelay("community-1"); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.AddRelay("community-1"); err != nil {
@@ -97,14 +101,15 @@ func TestRelayOptInAndDNSSettings(t *testing.T) {
 		t.Fatalf("empty relay = %v", err)
 	}
 	want := ipc.Settings{
-		FullTunnel: true, DNSPreset: "quad9", DoH: true,
-		Carriers: []string{"h3", "cdnws"}, DirectDomains: []string{}, DirectCIDRs: []string{},
+		FullTunnel: true, DNSPreset: "quad9", DoH: true, UseRelays: true,
+		Carriers: []string{"h3", "reverse", "cdnws", "dns"}, DirectDomains: []string{}, DirectCIDRs: []string{},
 	}
 	if err := h.SetSettings(want); err != nil {
 		t.Fatal(err)
 	}
 	got := h.Settings()
-	if got.DNS != "9.9.9.9:53" || got.DNSPreset != "quad9" || !got.DoH || len(got.Carriers) != 2 {
+	if got.DNS != "9.9.9.9:53" || got.DNSPreset != "quad9" || !got.DoH || !got.UseRelays ||
+		len(got.Carriers) != 2 || got.Carriers[0] != "h3" || got.Carriers[1] != "cdnws" {
 		t.Fatalf("settings = %+v", got)
 	}
 	if err := h.RemoveRelay("community-1"); err != nil {
@@ -121,7 +126,7 @@ func TestServersCarryCountry(t *testing.T) {
 			Params: map[string]string{"cc": "DE"},
 		}},
 	}.Encode()
-	if err := h.ImportInvite(uri); err != nil {
+	if _, err := h.ImportInvite(uri); err != nil {
 		t.Fatal(err)
 	}
 	sv := h.Servers()
@@ -136,7 +141,7 @@ func TestLoadMigratesProxyOnlyToFullTunnel(t *testing.T) {
 		TrustedKey: []string{"k"},
 		Endpoints:  []transport.Endpoint{{Kind: transport.KindH2, Name: "n", Addr: "n:443"}},
 	}.Encode()
-	if err := h.ImportInvite(uri); err != nil {
+	if _, err := h.ImportInvite(uri); err != nil {
 		t.Fatal(err)
 	}
 	c, err := config.Load(h.path)
@@ -158,5 +163,46 @@ func TestLoadMigratesProxyOnlyToFullTunnel(t *testing.T) {
 	}
 	if !got.Tun.TunnelOn() || got.Schema != config.SchemaCurrent {
 		t.Fatalf("expected full tunnel after load migrate, got %+v schema=%d", got.Tun, got.Schema)
+	}
+}
+
+func TestMergeEndpointsKindString(t *testing.T) {
+	a := transport.Endpoint{Kind: transport.KindH2, Addr: "a:443", Name: "a"}
+	b := transport.Endpoint{Kind: transport.KindH3, Addr: "b:443", Name: "b"}
+	got := product.MergeEndpoints([]transport.Endpoint{a}, []transport.Endpoint{a, b})
+	if len(got) != 2 {
+		t.Fatalf("merge = %+v", got)
+	}
+}
+
+func TestAccountUnauthorizedClearsInvite(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/account" {
+			http.NotFound(w, r)
+			return
+		}
+		http.Error(w, `{"error":"invalid account"}`, http.StatusUnauthorized)
+	}))
+	t.Cleanup(srv.Close)
+
+	h, _ := newHelper(t)
+	uri := invite.Invite{
+		TrustedKey: []string{"k"},
+		Account:    "dead-key",
+		Control:    []discovery.ControlChannel{{URL: srv.URL}},
+		Endpoints:  []transport.Endpoint{{Kind: transport.KindH2, Name: "n", Addr: "n:443"}},
+	}.Encode()
+	if _, err := h.ImportInvite(uri); err != nil {
+		t.Fatal(err)
+	}
+	if !h.Status().Configured {
+		t.Fatal("expected configured before account check")
+	}
+	_, err := h.Account()
+	if !errors.Is(err, &ipc.Error{Code: ipc.CodeAuth}) {
+		t.Fatalf("Account = %v, want auth", err)
+	}
+	if h.Status().Configured {
+		t.Fatal("stale invite must be cleared after auth rejection")
 	}
 }

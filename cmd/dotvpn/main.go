@@ -47,7 +47,7 @@ func run(ctx context.Context, args []string) error {
 	fs.SetOutput(os.Stderr)
 	cfgFlag := fs.String("config", "", "config file (default: $DOTVPN_CONFIG or the user config dir)")
 	verbose := fs.Bool("v", false, "debug logging")
-	inv := fs.String("invite", "", "dotvpn:// invite string (saved to the config)")
+	inv := fs.String("invite", "", "dv:// invite string (saved to the config)")
 	listen := fs.String("listen", "", "local proxy address, loopback only (default 127.0.0.1:1080)")
 	full := fs.Bool("tun", false, "full tunnel (needs root/Administrator)")
 	ks := fs.Bool("kill-switch", false, "block all traffic outside the tunnel (implies -tun)")

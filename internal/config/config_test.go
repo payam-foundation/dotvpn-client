@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -29,6 +30,9 @@ func TestTunnelOnAndMigrate(t *testing.T) {
 	if c.Tun.DNSPreset != "cloudflare" || c.Tun.DNS != "1.1.1.1:53" {
 		t.Fatalf("system DNS must migrate to cloudflare, got %+v", c.Tun)
 	}
+	if c.DeviceID == "" || !strings.HasPrefix(c.DeviceID, "dv_") {
+		t.Fatalf("device_id must be minted, got %q", c.DeviceID)
+	}
 	if c.Migrate() {
 		t.Fatal("second migrate must be a no-op")
 	}
@@ -41,8 +45,9 @@ func TestTunnelOnAndMigrate(t *testing.T) {
 func TestRelaysCarriersDNSRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "c.yaml")
 	c := &Config{
-		Relays: []string{"r1", "r2"}, Carriers: []string{"h3"},
-		Tun: TunConfig{DNSPreset: "google", DoH: true, DNS: "8.8.8.8:53"},
+		Relays: []string{"r1", "r2"}, UseRelays: true, Carriers: []string{"h3"},
+		Mirrors: []string{"https://mirror.example/list"},
+		Tun:     TunConfig{DNSPreset: "google", DoH: true, DNS: "8.8.8.8:53"},
 	}
 	c.Defaults()
 	if err := Save(path, c); err != nil {
@@ -53,7 +58,7 @@ func TestRelaysCarriersDNSRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(got.Relays) != 2 || got.Relays[0] != "r1" || len(got.Carriers) != 1 ||
-		got.Tun.DNSPreset != "google" || !got.Tun.DoH {
+		!got.UseRelays || len(got.Mirrors) != 1 || got.Tun.DNSPreset != "google" || !got.Tun.DoH {
 		t.Fatalf("got %+v", got)
 	}
 }

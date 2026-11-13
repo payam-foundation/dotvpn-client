@@ -23,6 +23,7 @@ import (
 	"github.com/payam-foundation/dotvpn-client/client"
 	"github.com/payam-foundation/dotvpn-client/internal/app"
 	"github.com/payam-foundation/dotvpn-client/internal/config"
+	"github.com/payam-foundation/dotvpn-client/internal/diag"
 	"github.com/payam-foundation/dotvpn-client/internal/ipc"
 	"github.com/payam-foundation/dotvpn-client/internal/router"
 	"github.com/payam-foundation/dotvpn-client/internal/tun"
@@ -34,6 +35,8 @@ type Options struct {
 	Config *config.Config
 	// Dir holds state.json and the server list cache (must be writable).
 	Dir string
+	// Diag is an optional L0 event ring (hashed endpoint ids only).
+	Diag *diag.Ring
 }
 
 // ErrRunning is returned by Start while a session is active.
@@ -67,7 +70,14 @@ type Session struct {
 	// While full tunnel is up and the probe is still running, Snapshot stays
 	// Connecting so the UI does not claim Connected with an empty Exit IP.
 	exitProbeDone bool
+	diag          *diag.Ring
 	subs          map[chan ipc.Status]struct{}
+}
+
+func (s *Session) note(e diag.Event) {
+	if s.diag != nil {
+		s.diag.Note(e)
+	}
 }
 
 type runState struct {
@@ -113,8 +123,10 @@ func (s *Session) Start(o Options) error {
 	s.run, s.link, s.lastEr, s.eng = r, ipc.StateConnecting, "", nil
 	s.full, s.ks = c.Tun.TunnelOn(), c.Tun.KillSwitch
 	s.exitIP, s.exitProbeDone = "", false
+	s.diag = o.Diag
 	s.mu.Unlock()
-	s.log.Info("session start", "full_tunnel", s.full, "kill_switch", s.ks, "listen", c.Listen)
+	s.log.Info("start", "full", s.full, "guard", s.ks)
+	s.note(diag.Event{Code: diag.CodeStart})
 	fail := func(err error) error {
 		cancel()
 		s.mu.Lock()
@@ -152,7 +164,7 @@ func (s *Session) Start(o Options) error {
 	if err != nil {
 		return fail(err)
 	}
-	s.log.Info("local proxy ready (SOCKS5 and HTTP)", "addr", ln.Addr().String())
+	s.log.Info("ready", "listen", "local")
 	s.up.Store(0)
 	s.down.Store(0)
 	s.tunUp.Store(false)
@@ -189,23 +201,23 @@ func (s *Session) main(ctx context.Context, r *runState, o Options, opts transpo
 				return nil
 			}
 			pins := s.pinHosts(ctx, bypass, c)
-			s.log.Info("engine linked, bringing up full tunnel", "pin_hosts", len(pins))
+			s.log.Info("start", "pins", len(pins))
 			err := tun.Run(ctx, tun.Config{
 				Name: c.Tun.Name, MTU: c.Tun.MTU, Tunnel: s.dial, Packet: s.dialPacket,
 				Bypass: bypass, Router: rt, KillSwitch: c.Tun.KillSwitch, PinHosts: pins, Log: s.log,
 				OnUp: func() {
-					s.log.Info("tunnel device up")
+					s.log.Info("ready", "device", "up")
 					s.tunUp.Store(true)
 					s.changed()
 				},
 			})
 			if err != nil && ctx.Err() == nil {
-				s.log.Error("tunnel failed", "err", err)
+				s.log.Error("fail", "err", err)
 			}
 			return err
 		})
 	} else {
-		s.log.Info("proxy-only session (full tunnel off)")
+		s.log.Info("ready", "mode", "proxy")
 	}
 
 	var first error
@@ -242,6 +254,7 @@ func (s *Session) connectLoop(ctx context.Context, o Options, opts transport.Opt
 	retry := func(err error) bool {
 		s.log.Warn("connect failed", "err", err, "retry_in", backoff)
 		s.setLink(ipc.StateFailed, err.Error())
+		s.note(diag.Event{Code: diag.CodeConnectFail, Detail: "retry"})
 		select {
 		case <-ctx.Done():
 			return false
@@ -277,8 +290,9 @@ func (s *Session) connectLoop(ctx context.Context, o Options, opts transport.Opt
 		s.mu.Unlock()
 		s.setLink(ipc.StateConnected, "")
 		info := eng.Info()
-		s.log.Info("engine connected", "endpoint", serverName(info.Endpoint),
-			"carrier", string(info.Endpoint.Kind), "full_tunnel", s.full, "tun_up", s.tunUp.Load())
+		epid := client.EndpointID(info.Endpoint)
+		s.note(diag.Event{Code: diag.CodeConnectOK, EndpointID: epid})
+		s.log.Info("ready", "id", epid, "full", s.full)
 		// Probe the public address through the tunnel dial path. Skip when the
 		// session is proxy-only (unit tests and local-proxy mode): a hanging
 		// stream must not stall reconnect detection.
@@ -322,7 +336,7 @@ func (s *Session) probeExitIP(ctx context.Context) {
 		s.mu.Unlock()
 		s.changed()
 	}()
-	s.log.Info("exit ip probe starting", "tun_up", s.tunUp.Load())
+	s.log.Debug("probe start", "up", s.tunUp.Load())
 	var last error
 	for attempt := 1; attempt <= 3; attempt++ {
 		if ctx.Err() != nil {
@@ -335,19 +349,19 @@ func (s *Session) probeExitIP(ctx context.Context) {
 				s.exitIP = ip
 			}
 			s.mu.Unlock()
-			s.log.Info("exit ip probe ok", "ip", ip, "attempt", attempt)
+			s.log.Debug("probe ok", "attempt", attempt)
 			s.changed()
 			return
 		}
 		last = err
-		s.log.Warn("exit ip probe attempt failed", "attempt", attempt, "err", err)
+		s.log.Debug("probe fail", "attempt", attempt)
 		select {
 		case <-ctx.Done():
 			return
 		case <-time.After(time.Duration(attempt) * time.Second):
 		}
 	}
-	s.log.Warn("exit ip probe exhausted", "err", last)
+	s.log.Warn("probe fail", "err", last)
 }
 
 // waitEngineLinked blocks until the engine reports Connected or ctx ends.
@@ -490,6 +504,7 @@ func (s *Session) Stop() {
 	if r == nil {
 		return
 	}
+	s.note(diag.Event{Code: diag.CodeStop})
 	r.cancel()
 	<-r.done
 }
@@ -543,6 +558,10 @@ func (s *Session) Snapshot() ipc.Status {
 			switch i.Endpoint.Kind {
 			case "reverse", "dns":
 				st.ViaRelay = serverName(i.Endpoint)
+				if i.Endpoint.Params != nil {
+					st.ViaRelayTier = i.Endpoint.Params["tier"]
+					st.ViaRelayID = i.Endpoint.Params["relay_id"]
+				}
 			}
 		}
 	}
@@ -588,6 +607,20 @@ func (s *Session) Servers() []ipc.Server {
 	if eng == nil {
 		return nil
 	}
+	return healthServers(eng)
+}
+
+// ProbeAll dials each ladder rung once on the live engine.
+func (s *Session) ProbeAll(ctx context.Context) bool {
+	eng := s.engine()
+	if eng == nil {
+		return false
+	}
+	eng.ProbeAll(ctx)
+	return true
+}
+
+func healthServers(eng *client.Engine) []ipc.Server {
 	var out []ipc.Server
 	for _, h := range eng.Health() {
 		sv := ipc.Server{

@@ -134,7 +134,7 @@ func Run(ctx context.Context, cfg Config) (err error) {
 			_ = dev.Close()
 			return fmt.Errorf("tun: configure %s: %w", name, err)
 		}
-		cfg.Log.Info("full tunnel up", "device", name, "kill_switch", cfg.KillSwitch, "pinned_hosts", len(pins))
+		cfg.Log.Info("ready", "device", name, "guard", cfg.KillSwitch, "pins", len(pins))
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

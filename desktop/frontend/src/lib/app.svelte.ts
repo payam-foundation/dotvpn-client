@@ -30,6 +30,8 @@ class App {
   prefs = $state<Prefs>(defaultPrefs);
   /** null until the first answer from the helper. */
   helper = $state<boolean | null>(null);
+  /** True once Status failed with version; keeps Update copy after a failed install. */
+  helperUpdate = $state(false);
   status = $state<Status>(emptyStatus);
   settings = $state<Settings>(emptySettings);
   servers = $state<Server[]>([]);
@@ -101,11 +103,20 @@ class App {
     try {
       this.#onStatus(await api.status());
       this.helper = true;
+      this.helperUpdate = false;
       this.settings = await api.settings();
       this.servers = await api.servers();
       if (this.status.configured) {
-        this.account = await api.account().catch(() => emptyAccount);
+        try {
+          this.account = await api.account();
+        } catch (e) {
+          if (this.#onAuthLost(e)) return;
+          this.account = emptyAccount;
+        }
         this.relays = await api.relays().catch(() => []);
+      } else {
+        this.account = emptyAccount;
+        this.relays = [];
       }
     } catch (e) {
       const err = toAppError(e);
@@ -113,7 +124,10 @@ class App {
       // both need Setup so InstallHelper can replace the root-owned binary.
       if (err.code === "helper_down" || err.code === "version") {
         this.helper = false;
-        if (err.code === "version") this.error = err;
+        if (err.code === "version") {
+          this.helperUpdate = true;
+          this.error = err;
+        }
       }
     }
   }
@@ -124,11 +138,31 @@ class App {
     try {
       if (live) this.#onStatus(await api.status());
       if (this.view === "home" || this.pickerOpen) this.servers = await api.servers();
-      if (this.view === "account") this.account = await api.account();
+      if (this.view === "account") {
+        try {
+          this.account = await api.account();
+        } catch (e) {
+          if (this.#onAuthLost(e)) return;
+        }
+      }
       if (this.view === "relay") this.relays = await api.relays();
     } catch {
       // The helper going away arrives as a "helper" event; polling stays quiet.
     }
+  }
+
+  /** Cleared invite / deleted user: helper already wiped; mirror that in the UI. */
+  #onAuthLost(e: unknown): boolean {
+    const err = toAppError(e);
+    if (err.code !== "auth") return false;
+    this.account = emptyAccount;
+    this.relays = [];
+    this.servers = [];
+    this.status = { ...emptyStatus, configured: false };
+    this.error = err;
+    this.notice = "";
+    this.view = "home";
+    return true;
   }
 
   #onStatus(s: Status): void {

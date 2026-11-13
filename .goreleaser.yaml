@@ -15,7 +15,7 @@ builds:
     flags:
       - -trimpath
     ldflags:
-      - -s -w -X main.version={{ .Version }}
+      - -s -w -X main.version={{ .Version }} -X github.com/payam-foundation/dotvpn-client/internal/crash.DSN={{ if index .Env "SENTRY_DSN_DESKTOP" }}{{ .Env.SENTRY_DSN_DESKTOP }}{{ end }}
     goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
 

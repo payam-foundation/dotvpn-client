@@ -57,7 +57,7 @@ for (const theme of ["light", "dark"] as const) {
       await expect(page.getByRole("heading", { name: "Connected" })).toBeVisible();
       await expect(page.getByRole("switch", { name: "Disconnect" })).toBeVisible();
       await expect(page.getByText("Frankfurt")).toBeVisible();
-      await expect(page.getByText("Exit IP")).toBeVisible();
+      await expect(page.getByText("IP", { exact: true })).toBeVisible();
       await expect(page.getByText("203.0.113.10")).toBeVisible();
       await expect(page.getByText("Safe", { exact: true })).toBeVisible();
       expect(await limePixels(page)).toBeGreaterThan(20);
@@ -79,9 +79,13 @@ for (const theme of ["light", "dark"] as const) {
       await expect(page.getByText("Davod")).toBeVisible();
       await shot(page, `account-${theme}`);
       await page.getByRole("button", { name: "Relay" }).click();
-      await expect(page.getByText("Relay DE")).toBeVisible();
-      await expect(page.getByText("Friends NL")).toBeVisible();
       await shot(page, `relay-${theme}`);
+      await page.getByRole("button", { name: /Public relays/ }).click();
+      await expect(page.getByText("Relay DE")).toBeVisible();
+      await page.getByRole("button", { name: "Back" }).first().click();
+      await page.getByRole("button", { name: /Private relays/ }).click();
+      await expect(page.getByText("Home Relay")).toBeVisible();
+      await page.getByRole("button", { name: "Back" }).first().click();
       await page.getByRole("button", { name: "Settings" }).click();
       await page.getByRole("tab", { name: "Connection" }).click();
       await expect(page.getByRole("switch", { name: /Block traffic/ })).toBeVisible();
@@ -131,7 +135,7 @@ test("first run: set up helper, then add invite", async ({ page }) => {
   await page.getByRole("button", { name: "Add invite" }).click();
   await expect(page.getByText("This invite link isn't valid. Ask the operator for a new one.")).toBeVisible();
   await shot(page, "invite-error-light");
-  await page.getByLabel("Invite link").fill("dotvpn://eyJ2IjoxLCJub2RlIjoiZXhhbXBsZS5jb20ifQ");
+  await page.getByLabel("Invite link").fill("dv://eyJ2IjoxLCJub2RlIjoiZXhhbXBsZS5jb20ifQ");
   await page.getByRole("button", { name: "Add invite" }).click();
   await expect(page.getByRole("switch", { name: "Connect" })).toBeVisible();
 });
@@ -139,9 +143,9 @@ test("first run: set up helper, then add invite", async ({ page }) => {
 test("account opens invite screen", async ({ page }) => {
   await open(page, "state=off");
   await page.getByRole("button", { name: "Account" }).click();
-  await page.getByRole("button", { name: "Add invite" }).click();
+  await page.getByRole("button", { name: "Replace account" }).click();
   await page.getByRole("button", { name: "Paste" }).click();
-  await expect(page.getByLabel("Invite link")).toHaveValue(/^dotvpn:\/\/.*…/);
+  await expect(page.getByLabel("Invite link")).toHaveValue(/^dv:\/\/.*…/);
   await expect(page.getByLabel("Invite link")).toHaveAttribute("dir", "ltr");
 });
 
@@ -211,7 +215,7 @@ test.describe("Persian", () => {
       await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
       await expect(page.locator("html")).toHaveAttribute("lang", "fa");
       await expect(page.getByRole("heading", { name: "متصل" })).toBeVisible();
-      await expect(page.getByText("۴۲ میلی‌ثانیه")).toBeVisible();
+      await expect(page.getByText("۴۲ میلی‌ثانیه").first()).toBeVisible();
       await expect(page.getByText(/\d/).first()).toBeAttached();
       const font = await page.getByRole("heading", { name: "متصل" }).evaluate((e) => getComputedStyle(e).fontFamily);
       expect(font).toContain("Vazirmatn");
@@ -231,7 +235,7 @@ test.describe("Persian", () => {
   test("invite field stays LTR", async ({ page }) => {
     await open(page, "lang=fa&state=off");
     await page.getByRole("button", { name: "حساب" }).click();
-    await page.getByRole("button", { name: "افزودن دعوت‌نامه" }).click();
+    await page.getByRole("button", { name: "جایگزینی حساب" }).click();
     await expect(page.getByLabel("لینک دعوت")).toHaveAttribute("dir", "ltr");
   });
 });

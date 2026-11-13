@@ -125,11 +125,11 @@ func TestCopyKeysMatch(t *testing.T) {
 }
 
 func TestInviteFrom(t *testing.T) {
-	if got := inviteFrom([]string{"--background", "dotvpn://abc"}); got != "dotvpn://abc" {
+	if got := inviteFrom([]string{"--background", "dv://abc"}); got != "dv://abc" {
 		t.Errorf("got %q", got)
 	}
 	if inviteFrom([]string{"--background", "https://x"}) != "" {
-		t.Error("only dotvpn:// links count")
+		t.Error("only dv:// links count")
 	}
 }
 

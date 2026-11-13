@@ -18,6 +18,7 @@ let settings: Settings = {
   dnsPreset: "cloudflare",
   doh: false,
   systemDns: "192.168.1.1",
+  useRelays: q.has("viarelay"),
   carriers: [],
   directDomains: q.has("routes") ? ["bank.ir", "*.local.example"] : [],
   directCidrs: q.has("routes") ? ["10.0.0.0/8", "192.168.0.0/16"] : [],
@@ -40,6 +41,7 @@ let t0 = Date.now();
 let account: Account = {
   name: "Davod",
   quotaLimit: 50 * 1024 ** 3,
+  quotaUsed: 18 * 1024 ** 3,
   quotaRemaining: 32 * 1024 ** 3,
   quotaReset: new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + 1, 1)).toISOString(),
   expires: Math.floor(Date.now() / 1000) + 86400 * 40,
@@ -50,8 +52,9 @@ let account: Account = {
 };
 
 let relays: Relay[] = [
-  { id: "curated-de", name: "Relay DE", country: "DE", tier: "curated", health: "ok", optedIn: false },
-  { id: "community-1", name: "Friends NL", country: "NL", tier: "community", health: "degraded", optedIn: true },
+  { id: "system-de", name: "Relay DE", country: "DE", tier: "system", health: "ok", public: true, optedIn: false },
+  { id: "community-1", name: "Friends NL", country: "NL", tier: "community", health: "degraded", public: true, optedIn: true },
+  { id: "private-1", name: "Home Relay", country: "IR", tier: "community", health: "ok", public: false, optedIn: true, invite: "dvr://private" },
 ];
 
 const servers = (): Server[] => [
@@ -71,6 +74,8 @@ function status(): Status {
     server: state === "connected" ? "Frankfurt" : undefined,
     country: state === "connected" ? "DE" : undefined,
     viaRelay: state === "connected" && q.has("viarelay") ? "Relay DE" : undefined,
+    viaRelayTier: state === "connected" && q.has("viarelay") ? "curated" : undefined,
+    viaRelayId: state === "connected" && q.has("viarelay") ? "relay-de" : undefined,
     latencyMs: state === "connected" ? 42 : undefined,
     since: state === "connected" ? new Date(since).toISOString() : undefined,
     exitIp: state === "connected" ? "203.0.113.10" : undefined,
@@ -127,16 +132,22 @@ export const mockApi: Api = {
     emit("status", status());
   },
   importInvite: async (uri) => {
-    if (!uri.startsWith("dotvpn://") || uri.length < 20) fail("bad_invite", "bad invite");
+    if (!uri.startsWith("dv://") || uri.length < 20) fail("bad_invite", "bad invite");
     configured = true;
     emit("status", status());
+    return { needsRelay: false };
   },
   servers: async () => (configured ? servers() : []),
+  probeServers: async () => {
+    const list = configured ? servers().map((s, i) => ({ ...s, latencyMs: 40 + i * 12 })) : [];
+    return list;
+  },
   settings: async () => structuredClone(settings),
   setSettings: async (s) => {
     settings = structuredClone(s);
   },
   unblock: async () => {},
+  reportDiagnostics: async () => ({ issueUrl: "https://github.com/payam-foundation/dotvpn-client/issues/new", via: "browser" }),
   installHelper: async () => {
     await new Promise((r) => setTimeout(r, frozen ? 60_000 : 600));
     helper = true;
@@ -152,19 +163,25 @@ export const mockApi: Api = {
     const id = idOrURI.replace(/^dotvpn-relay:\/\//, "").split(/[/?#]/)[0]?.trim() ?? "";
     if (!id) fail("bad_invite", "invalid relay id");
     if (!relays.some((r) => r.id === id)) {
-      relays = [...relays, { id, name: id, tier: "community", health: "offline", optedIn: true }];
+      relays = [...relays, { id, name: id, tier: "community", health: "offline", public: false, optedIn: true }];
     } else {
       relays = relays.map((r) => (r.id === id ? { ...r, optedIn: true } : r));
     }
   },
   removeRelay: async (id) => {
-    relays = relays.map((r) => (r.id === id ? { ...r, optedIn: false } : r)).filter((r) => r.tier === "curated" || r.optedIn);
+    relays = relays.map((r) => (r.id === id ? { ...r, optedIn: false } : r)).filter((r) => r.tier === "system" || r.public || r.optedIn);
+  },
+  ads: async (slot) => {
+    if (slot === "home") {
+      return [{ id: "ad1", issuer: "owner", format: "card", title: "Dot VPN Premium", desc: "Go ad-free.", link: "https://dotvpn.org" }];
+    }
+    return [];
   },
   logout: async () => {
     configured = false;
     state = "off";
     error = "";
-    account = { name: "", quotaLimit: 0, quotaRemaining: 0, maxDevices: 0, disabled: false };
+    account = { name: "", quotaLimit: 0, quotaUsed: 0, quotaRemaining: 0, maxDevices: 0, disabled: false };
     emit("status", status());
   },
   prefs: async () => structuredClone(prefs),
@@ -173,7 +190,9 @@ export const mockApi: Api = {
     emit("prefs", prefs);
   },
   takeInvite: async (): Promise<InviteResult | null> => null,
-  paste: async () => "dotvpn://eyJ2IjoxLCJub2RlIjoiZXhhbXBsZS5jb20iLCJrZXkiOiJBYkNkRWZHaElqS2xNbk9wIn0",
+  helperLogPath: async () => "/var/log/dotvpn.log",
+  openHelperLog: async () => {},
+  paste: async () => "dv://eyJ2IjoxLCJub2RlIjoiZXhhbXBsZS5jb20iLCJrZXkiOiJBYkNkRWZHaElqS2xNbk9wIn0",
   on: (name, cb) => {
     const set = listeners[name] as Set<typeof cb>;
     set.add(cb);

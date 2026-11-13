@@ -5,8 +5,24 @@ package service
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 )
+
+// HelperLogPath is where the helper process writes session logs (stderr on
+// macOS LaunchDaemon; journal on Linux; Windows event / service log elsewhere).
+func HelperLogPath() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "/var/log/dotvpn.log"
+	case "linux":
+		return "journalctl -u dotvpn"
+	case "windows":
+		return `C:\ProgramData\dotvpn\helper.log`
+	default:
+		return ""
+	}
+}
 
 // Name is the service identifier on every OS.
 const Name = "dotvpn"

@@ -12,35 +12,63 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/payam-foundation/dotvpn-client/client"
+	"github.com/payam-foundation/dotvpn-client/internal/app"
 	"github.com/payam-foundation/dotvpn-client/internal/config"
+	"github.com/payam-foundation/dotvpn-client/internal/crash"
 	"github.com/payam-foundation/dotvpn-client/internal/daemon"
+	"github.com/payam-foundation/dotvpn-client/internal/diag"
 	"github.com/payam-foundation/dotvpn-client/internal/ipc"
 	"github.com/payam-foundation/dotvpn-client/internal/tun"
 	"github.com/payam-foundation/dotvpn-wire/invite"
+	"github.com/payam-foundation/dotvpn-wire/transport"
 )
+
+// AppVersion is set by the helper process (ldflags / main).
+var AppVersion = "dev"
 
 // Helper implements ipc.Backend.
 type Helper struct {
-	log  *slog.Logger
-	path string
-	sess *daemon.Session
+	log   *slog.Logger
+	path  string
+	sess  *daemon.Session
+	crash crash.Reporter
+	ring  *diag.Ring
 	// unblock removes leftover firewall rules; tests replace it.
 	unblock func(*slog.Logger) error
 
 	mu sync.Mutex // guards the config file
+
+	probeMu  sync.Mutex
+	probeMS  map[string]int
+	probeErr map[string]string
 }
 
 // New returns a Helper keeping its config at path.
 func New(log *slog.Logger, path string) *Helper {
-	return &Helper{log: log, path: path, sess: daemon.New(log), unblock: tun.Unblock}
+	h := &Helper{
+		log: log, path: path, sess: daemon.New(log), unblock: tun.Unblock,
+		ring: diag.NewRing("desktop", AppVersion),
+	}
+	h.crash = crash.New(crash.Options{
+		Release: AppVersion,
+		Load: func() bool {
+			c, err := config.Load(path)
+			return err == nil && c.CrashReporting
+		},
+		// Persist is nil: SetSettings owns the config write so we never
+		// re-enter h.mu from inside SetEnabled (non-reentrant mutex).
+	})
+	return h
 }
 
 // Run clears kill-switch rules a crashed helper left behind, then serves ln
 // until ctx ends. It stops the session on the way out so routes, DNS and
 // firewall are restored.
 func (h *Helper) Run(ctx context.Context, ln net.Listener) error {
+	defer crash.Recover()
 	if err := h.unblock(h.log); err != nil {
 		h.log.Warn("startup unblock failed", "err", err)
 	}
@@ -66,7 +94,7 @@ func (h *Helper) load() (*config.Config, error) {
 		if err := config.Save(h.path, c); err != nil {
 			h.log.Warn("config migrate save failed", "err", err)
 		} else {
-			h.log.Info("config migrated", "schema", c.Schema, "full_tunnel", c.Tun.TunnelOn())
+			h.log.Info("ready", "schema", c.Schema, "full", c.Tun.TunnelOn())
 		}
 	}
 	return c, nil
@@ -171,38 +199,58 @@ func (h *Helper) Connect() error {
 	cfg := *c
 	cfg.Tun.DNS = bypassDNS(c.Tun.DNSPreset, c.Tun.DNS)
 	h.mu.Unlock()
-	h.log.Info("connect", "full_tunnel", on, "kill_switch", c.Tun.KillSwitch,
-		"dns_preset", c.Tun.DNSPreset, "bypass_dns", cfg.Tun.DNS, "schema", c.Schema,
-		"endpoints", len(c.Endpoints), "account", c.Account != "")
+	h.log.Info("connect", "full", on, "guard", c.Tun.KillSwitch, "schema", c.Schema, "n", len(c.Endpoints))
 	if !on {
-		h.log.Warn("connect starting proxy-only; system traffic will not be routed")
+		h.log.Warn("connect", "mode", "proxy")
 	}
-	err = h.sess.Start(daemon.Options{Config: &cfg, Dir: filepath.Dir(h.path)})
+	err = h.sess.Start(daemon.Options{Config: &cfg, Dir: filepath.Dir(h.path), Diag: h.ring})
 	switch {
 	case errors.Is(err, daemon.ErrNotConfigured):
 		return ipc.Coded(ipc.CodeNotConfigured, err)
 	case errors.Is(err, daemon.ErrRunning):
 		return ipc.Coded(ipc.CodeBusy, err)
 	}
+	if err != nil {
+		h.log.Warn("connect failed", "err", err)
+	}
 	return err
 }
 
-func (h *Helper) Disconnect() { h.sess.Stop() }
+func (h *Helper) Disconnect() {
+	h.log.Info("disconnect")
+	h.sess.Stop()
+}
 
-func (h *Helper) ImportInvite(uri string) error {
+func (h *Helper) ImportInvite(uri string) (ipc.ImportResult, error) {
 	i, err := invite.DecodeInvite(uri)
 	if err != nil {
-		return ipc.Coded(ipc.CodeBadInvite, err)
+		return ipc.ImportResult{}, ipc.Coded(ipc.CodeBadInvite, err)
 	}
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	c, err := h.load()
 	if err != nil {
-		return err
+		h.mu.Unlock()
+		return ipc.ImportResult{}, err
 	}
 	c.Apply(i)
 	c.Pin = "" // the old ladder is gone
-	return config.Save(h.path, c)
+	if err := config.Save(h.path, c); err != nil {
+		h.mu.Unlock()
+		return ipc.ImportResult{}, err
+	}
+	base, key := "", ""
+	if c.Account != "" && len(c.Control) > 0 {
+		base, key = c.Control[0].URL, c.Account
+	}
+	h.mu.Unlock()
+	if base == "" || key == "" {
+		return ipc.ImportResult{}, nil
+	}
+	if !probeControl(base, key) {
+		h.log.Info("import saved; control unreachable")
+		return ipc.ImportResult{NeedsRelay: true}, nil
+	}
+	return ipc.ImportResult{}, nil
 }
 
 // Logout disconnects and wipes invite/account material from this device.
@@ -277,6 +325,16 @@ func (h *Helper) Servers() []ipc.Server {
 		for i := range s {
 			fillCountry(&s[i])
 		}
+		// Active session country fills any rung the signed list left blank
+		// (stale cache / invite without Params["cc"]).
+		if st := h.sess.Snapshot(); st.Country != "" {
+			for i := range s {
+				if s[i].Country == "" {
+					s[i].Country = st.Country
+				}
+			}
+		}
+		h.applyProbe(s)
 		return s
 	}
 	if err != nil {
@@ -296,7 +354,83 @@ func (h *Helper) Servers() []ipc.Server {
 		fillCountry(&sv)
 		out = append(out, sv)
 	}
+	h.applyProbe(out)
 	return out
+}
+
+// ProbeServers dials each ladder rung once and returns servers with latency.
+func (h *Helper) ProbeServers() ([]ipc.Server, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	h.log.Info("probe servers")
+	if h.sess.ProbeAll(ctx) {
+		return h.Servers(), nil
+	}
+	h.mu.Lock()
+	c, err := h.load()
+	h.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	if !configured(c) {
+		return nil, ipc.Coded(ipc.CodeNotConfigured, daemon.ErrNotConfigured)
+	}
+	cfg := *c
+	cfg.Tun.DNS = bypassDNS(c.Tun.DNSPreset, c.Tun.DNS)
+	eng, err := app.NewEngine(ctx, app.Params{
+		Config: &cfg, Dir: filepath.Dir(h.path),
+		Opts: transport.Options{}, Log: h.log,
+	})
+	if err != nil {
+		h.log.Warn("probe skipped", "err", err)
+		return h.Servers(), nil
+	}
+	defer eng.Close()
+	eng.ProbeAll(ctx)
+	var out []ipc.Server
+	for _, x := range eng.Health() {
+		name := x.Endpoint.Name
+		if name == "" {
+			name = string(x.Endpoint.Kind)
+		}
+		cc := ""
+		if x.Endpoint.Params != nil {
+			cc = x.Endpoint.Params["cc"]
+		}
+		out = append(out, ipc.Server{
+			ID: x.ID, Name: name, Country: cc, Carrier: string(x.Endpoint.Kind),
+			LatencyMS: int(x.Latency.Milliseconds()), Error: x.Err,
+		})
+	}
+	h.storeProbe(out)
+	return h.Servers(), nil
+}
+
+func (h *Helper) storeProbe(sv []ipc.Server) {
+	h.probeMu.Lock()
+	defer h.probeMu.Unlock()
+	h.probeMS = map[string]int{}
+	h.probeErr = map[string]string{}
+	for _, s := range sv {
+		h.probeMS[s.ID] = s.LatencyMS
+		h.probeErr[s.ID] = s.Error
+	}
+}
+
+func (h *Helper) applyProbe(sv []ipc.Server) {
+	h.probeMu.Lock()
+	defer h.probeMu.Unlock()
+	if len(h.probeMS) == 0 {
+		return
+	}
+	for i := range sv {
+		if sv[i].LatencyMS == 0 {
+			sv[i].LatencyMS = h.probeMS[sv[i].ID]
+		}
+		if sv[i].Error == "" {
+			sv[i].Error = h.probeErr[sv[i].ID]
+		}
+	}
 }
 
 func (h *Helper) Settings() ipc.Settings {
@@ -313,8 +447,9 @@ func (h *Helper) Settings() ipc.Settings {
 	return ipc.Settings{
 		FullTunnel: c.Tun.TunnelOn(), KillSwitch: c.Tun.KillSwitch,
 		DNS: c.Tun.DNS, DNSPreset: preset, DoH: c.Tun.DoH, SystemDNS: readSystemDNS(),
-		Pin: c.Pin, Carriers: nonNil(c.Carriers),
+		Pin: c.Pin, UseRelays: c.UseRelays, Carriers: selectableCarriers(c.Carriers),
 		DirectDomains: nonNil(c.Routing.DirectDomains), DirectCIDRs: nonNil(c.Routing.DirectCIDRs),
+		CrashReporting: c.CrashReporting,
 	}
 }
 
@@ -322,9 +457,9 @@ func (h *Helper) Settings() ipc.Settings {
 // next Connect.
 func (h *Helper) SetSettings(s ipc.Settings) error {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	c, err := h.load()
 	if err != nil {
+		h.mu.Unlock()
 		return err
 	}
 	c.Tun.SetEnabled(s.FullTunnel || s.KillSwitch) // a kill switch needs the tunnel
@@ -338,9 +473,46 @@ func (h *Helper) SetSettings(s ipc.Settings) error {
 		c.Tun.DNSPreset = "custom"
 	}
 	c.Pin = s.Pin
-	c.Carriers = append([]string(nil), s.Carriers...)
+	c.UseRelays = s.UseRelays
+	c.Carriers = selectableCarriers(s.Carriers)
 	c.Routing.DirectDomains, c.Routing.DirectCIDRs = s.DirectDomains, s.DirectCIDRs
-	return config.Save(h.path, c)
+	c.CrashReporting = s.CrashReporting
+	err = config.Save(h.path, c)
+	h.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	if h.crash != nil {
+		_ = h.crash.SetEnabled(s.CrashReporting)
+	}
+	return nil
+}
+
+// ReportDiagnostics submits a scrubbed L0 snapshot via control or browser.
+func (h *Helper) ReportDiagnostics() (ipc.ReportResult, error) {
+	base, key, _, err := h.controlCreds()
+	if err != nil {
+		// Still allow browser fallback without control.
+		base, key = "", ""
+	}
+	st := h.sess.Snapshot()
+	h.ring.SetState(string(st.State))
+	b := h.ring.Snapshot()
+	sub := &diag.ClientSubmit{
+		ControlURL: base,
+		AccountKey: key,
+		OpenURL: func(u string) error {
+			// Best-effort: GUI also shows the URL; helper may not open a browser.
+			h.log.Info("ready", "report", "browser")
+			_ = u
+			return nil
+		},
+	}
+	res, err := sub.Submit(context.Background(), b)
+	if err != nil {
+		return ipc.ReportResult{}, err
+	}
+	return ipc.ReportResult{IssueURL: res.IssueURL, Via: res.Via}, nil
 }
 
 // dnsForPreset maps a UI preset to the stored DNS field. For "system" the
@@ -380,4 +552,14 @@ func nonNil(s []string) []string {
 		return []string{}
 	}
 	return s
+}
+
+func selectableCarriers(s []string) []string {
+	out := make([]string, 0, len(s))
+	for _, kind := range s {
+		if kind != "reverse" && kind != "dns" {
+			out = append(out, kind)
+		}
+	}
+	return out
 }
