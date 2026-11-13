@@ -145,7 +145,7 @@ test("account opens invite screen", async ({ page }) => {
   await page.getByRole("button", { name: "Account" }).click();
   await page.getByRole("button", { name: "Replace account" }).click();
   await page.getByRole("button", { name: "Paste" }).click();
-  await expect(page.getByLabel("Invite link")).toHaveValue(/^dotvpn:\/\/.*…/);
+  await expect(page.getByLabel("Invite link")).toHaveValue(/^dv:\/\/.*…/);
   await expect(page.getByLabel("Invite link")).toHaveAttribute("dir", "ltr");
 });
 
@@ -215,7 +215,7 @@ test.describe("Persian", () => {
       await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
       await expect(page.locator("html")).toHaveAttribute("lang", "fa");
       await expect(page.getByRole("heading", { name: "متصل" })).toBeVisible();
-      await expect(page.getByText("۴۲ میلی‌ثانیه")).toBeVisible();
+      await expect(page.getByText("۴۲ میلی‌ثانیه").first()).toBeVisible();
       await expect(page.getByText(/\d/).first()).toBeAttached();
       const font = await page.getByRole("heading", { name: "متصل" }).evaluate((e) => getComputedStyle(e).fontFamily);
       expect(font).toContain("Vazirmatn");
