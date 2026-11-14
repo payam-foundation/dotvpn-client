@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package router decides, per flow, whether traffic goes through the tunnel or
 // straight out of the physical interface (Iranian domestic sites and IPs).
 package router

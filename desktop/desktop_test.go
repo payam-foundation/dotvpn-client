@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package main
 
 import (
@@ -154,5 +156,15 @@ func TestPrefsRoundTrip(t *testing.T) {
 	}
 	if s.get().Language != "fa" {
 		t.Error("a rejected set must not change prefs")
+	}
+}
+
+func TestReportPathRejectsTraversal(t *testing.T) {
+	if _, err := reportPath("../../etc/pw"); err == nil {
+		t.Fatal("traversal id accepted")
+	}
+	p, err := reportPath("K7MQ2XAB")
+	if err != nil || filepath.Base(p) != "r-K7MQ2XAB.dat" {
+		t.Fatalf("got %q %v", p, err)
 	}
 }

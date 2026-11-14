@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package client is the user-side engine: it keeps one live Session to a node,
 // choosing the carrier with a fallback ladder, and exposes it as a plain
 // DialContext to the local proxy and TUN fronts.
@@ -13,10 +15,12 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/payam-foundation/dotvpn-wire/transport"
+	"github.com/payam-foundation/dotvpn-wire/transport/reverse"
 )
 
 // EngineConfig configures an Engine.
@@ -64,11 +68,25 @@ type Engine struct {
 	since    time.Time
 	health   map[string]epHealth
 
+	// netGen counts physical network changes; knowledge learned under an
+	// older generation (cool-downs, latencies) no longer applies.
+	netGen     uint64
+	roam       *time.Timer        // pending debounced NetworkChanged
+	cancelRace context.CancelFunc // aborts the connect in flight
+
+	wake chan struct{} // signals Keep after a roam
+
 	connMu sync.Mutex
 	closed bool
 }
 
-const maxCooldown = 30 * time.Minute
+var errNetworkChanged = errors.New("client: network changed while connecting")
+
+const (
+	maxCooldown = 30 * time.Minute
+	// roamDebounce coalesces the burst of callbacks a single roam raises.
+	roamDebounce = 750 * time.Millisecond
+)
 
 // NewEngine builds an Engine; call Run to start the fallback ladder.
 func NewEngine(c EngineConfig) *Engine {
@@ -84,6 +102,7 @@ func NewEngine(c EngineConfig) *Engine {
 	e := &Engine{
 		cfg: c, eps: c.Endpoints,
 		cooldown: map[string]time.Time{}, fails: map[string]int{}, health: map[string]epHealth{},
+		wake: make(chan struct{}, 1),
 	}
 	if c.Store != nil {
 		if st := c.Store.Load(); st.Key != "" {
@@ -115,6 +134,9 @@ func (e *Engine) Status() string {
 func (e *Engine) Close() error {
 	e.mu.Lock()
 	e.closed = true
+	if e.roam != nil {
+		e.roam.Stop()
+	}
 	s := e.sess
 	e.sess = nil
 	e.mu.Unlock()
@@ -207,6 +229,51 @@ func (e *Engine) DialPacket(ctx context.Context, addr string) (net.Conn, error) 
 	return nil, lastErr
 }
 
+// NetworkChanged tells the engine the physical network changed (Wi-Fi to
+// cellular, new gateway). Bursts are coalesced. The live session is closed
+// without penalising its endpoint, what was learned about the old network is
+// forgotten, and Keep reconnects at once.
+func (e *Engine) NetworkChanged() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return
+	}
+	if e.roam != nil {
+		e.roam.Stop()
+	}
+	e.roam = time.AfterFunc(roamDebounce, e.roamed)
+}
+
+func (e *Engine) roamed() {
+	e.mu.Lock()
+	if e.closed {
+		e.mu.Unlock()
+		return
+	}
+	e.netGen++
+	clear(e.cooldown)
+	clear(e.fails)
+	e.fast = false
+	s, cancel := e.sess, e.cancelRace
+	e.sess = nil
+	e.mu.Unlock()
+	e.cfg.Log.Info("network changed")
+	if cancel != nil {
+		cancel()
+	}
+	if s != nil {
+		_ = s.Close()
+	}
+	e.notify()
+}
+
+func (e *Engine) generation() uint64 {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.netGen
+}
+
 func (e *Engine) drop(s transport.Session) {
 	dropped := false
 	e.mu.Lock()
@@ -239,11 +306,22 @@ func (e *Engine) session(ctx context.Context) (transport.Session, error) {
 	if closed {
 		return nil, errors.New("client: engine closed")
 	}
-	s, ep, err := e.race(ctx)
+	rctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	e.mu.Lock()
+	e.cancelRace = cancel
+	gen := e.netGen
+	e.mu.Unlock()
+	s, ep, err := e.race(rctx)
 	if err != nil {
 		return nil, err
 	}
 	e.mu.Lock()
+	if e.netGen != gen { // the network changed while this session was dialling
+		e.mu.Unlock()
+		_ = s.Close()
+		return nil, errNetworkChanged
+	}
 	e.sess, e.cur, e.prefer, e.since = s, ep, key(ep), time.Now()
 	delete(e.fails, key(ep))
 	delete(e.cooldown, key(ep))
@@ -381,6 +459,15 @@ func (e *Engine) order(eps []transport.Endpoint, skipCool bool) []transport.Endp
 			mid = append(mid, ep)
 		}
 	}
+	gen := e.netGen
+	fresh := func(ep transport.Endpoint) bool { return e.health[key(ep)].fresh(gen, now) }
+	sort.SliceStable(mid, func(i, j int) bool { // fresh and fast first, unknown keeps config order
+		fi, fj := fresh(mid[i]), fresh(mid[j])
+		if fi && fj {
+			return e.health[key(mid[i])].latency < e.health[key(mid[j])].latency
+		}
+		return fi && !fj
+	})
 	out := append(first, mid...)
 	if !skipCool || len(out) == 0 {
 		out = append(out, cool...)
@@ -414,10 +501,10 @@ const fastPathBudget = 6 * time.Second
 // dialVerified dials ep and, when ProbeTarget is set, proves the data plane
 // before reporting success.
 func (e *Engine) dialVerified(ctx context.Context, ep transport.Endpoint) (transport.Session, error) {
-	start := time.Now()
+	start, gen := time.Now(), e.generation()
 	s, err := e.dialProbed(ctx, ep)
 	if ctx.Err() == nil || err == nil { // a rung cancelled by the race winner says nothing about its health
-		e.record(ep, time.Since(start), err)
+		e.record(ep, time.Since(start), err, gen)
 	}
 	return s, err
 }
@@ -450,8 +537,8 @@ type attempt struct {
 	err error
 }
 
-// race connects along the ladder happy-eyeballs style: rung N+1 starts when
-// the Stagger delay passes or rung N fails, first established session wins.
+// race connects along the ladder in two tiers (direct edge first, in-country
+// relays second), happy-eyeballs style within each tier.
 func (e *Engine) race(ctx context.Context) (transport.Session, transport.Endpoint, error) {
 	order := e.arrange(e.expand(ctx, true))
 	if len(order) == 0 {
@@ -460,9 +547,48 @@ func (e *Engine) race(ctx context.Context) (transport.Session, transport.Endpoin
 	if s, ep, ok := e.fastPath(ctx, order); ok {
 		return s, ep, nil
 	}
-	rctx, cancel := context.WithCancel(ctx)
+
+	var direct, relays []transport.Endpoint
+	for _, ep := range order {
+		if ep.Kind == reverse.KindReverse || ep.Kind == reverse.KindDNS {
+			relays = append(relays, ep)
+		} else {
+			direct = append(direct, ep)
+		}
+	}
+
+	// Phase 1: Direct edge carriers (300ms stagger, max 2.5s budget before relay fallback).
+	if len(direct) > 0 {
+		directBudget := 2500 * time.Millisecond
+		if len(relays) == 0 {
+			directBudget = 0 // no relays to fall back to; direct owns the entire context
+		}
+		s, ep, err := e.raceTier(ctx, direct, 300*time.Millisecond, directBudget, len(direct))
+		if err == nil {
+			return s, ep, nil
+		}
+		e.cfg.Log.Debug("direct tier failed or timed out", "err", err)
+	}
+
+	// Phase 2: In-country relays (750ms stagger, max 2 concurrent attempts).
+	if len(relays) > 0 {
+		return e.raceTier(ctx, relays, 750*time.Millisecond, 0, 2)
+	}
+
+	return nil, transport.Endpoint{}, errors.New("client: all endpoints failed")
+}
+
+func (e *Engine) raceTier(ctx context.Context, tier []transport.Endpoint, stagger time.Duration, budget time.Duration, maxConc int) (transport.Session, transport.Endpoint, error) {
+	tctx := ctx
+	var cancelBudget context.CancelFunc
+	if budget > 0 {
+		tctx, cancelBudget = context.WithTimeout(ctx, budget)
+		defer cancelBudget()
+	}
+	rctx, cancel := context.WithCancel(tctx)
 	defer cancel()
-	results := make(chan attempt, len(order))
+
+	results := make(chan attempt, len(tier))
 	launch := func(ep transport.Endpoint) {
 		go func() {
 			s, err := e.dialVerified(rctx, ep)
@@ -472,20 +598,21 @@ func (e *Engine) race(ctx context.Context) (transport.Session, transport.Endpoin
 
 	launched, received := 0, 0
 	next := func() {
-		if launched < len(order) {
-			launch(order[launched])
+		if launched < len(tier) && (maxConc <= 0 || (launched-received) < maxConc) {
+			launch(tier[launched])
 			launched++
 		}
 	}
+
 	next()
-	timer := time.NewTimer(e.cfg.Stagger)
+	timer := time.NewTimer(stagger)
 	defer timer.Stop()
 	var errs []error
 	for {
 		select {
 		case <-timer.C:
 			next()
-			timer.Reset(e.cfg.Stagger)
+			timer.Reset(stagger)
 		case r := <-results:
 			received++
 			if r.err == nil {
@@ -499,18 +626,18 @@ func (e *Engine) race(ctx context.Context) (transport.Session, transport.Endpoin
 				return r.s, r.ep, nil
 			}
 			e.cfg.Log.Debug("endpoint failed", "endpoint", r.ep.Label(), "err", r.err)
-			e.mu.Lock()
-			e.markCoolLocked(key(r.ep))
-			e.mu.Unlock()
-			e.persistCool()
+			if ctx.Err() == nil { // an attempt cancelled by a roam is not an endpoint fault
+				e.mu.Lock()
+				e.markCoolLocked(key(r.ep))
+				e.mu.Unlock()
+				e.persistCool()
+			}
 			errs = append(errs, fmt.Errorf("%s: %w", r.ep.Label(), r.err))
-			if received == len(order) {
-				return nil, transport.Endpoint{}, fmt.Errorf("client: all endpoints failed: %w", errors.Join(errs...))
+			if received == len(tier) {
+				return nil, transport.Endpoint{}, fmt.Errorf("tier failed: %w", errors.Join(errs...))
 			}
-			if received == launched {
-				next()
-			}
-		case <-ctx.Done():
+			next()
+		case <-tctx.Done():
 			go func(pending int) {
 				for range pending {
 					if l := <-results; l.s != nil {
@@ -518,7 +645,13 @@ func (e *Engine) race(ctx context.Context) (transport.Session, transport.Endpoin
 					}
 				}
 			}(launched - received)
-			return nil, transport.Endpoint{}, ctx.Err()
+			if ctx.Err() != nil {
+				return nil, transport.Endpoint{}, ctx.Err()
+			}
+			if len(errs) > 0 {
+				return nil, transport.Endpoint{}, errors.Join(append(errs, tctx.Err())...)
+			}
+			return nil, transport.Endpoint{}, tctx.Err()
 		}
 	}
 }
