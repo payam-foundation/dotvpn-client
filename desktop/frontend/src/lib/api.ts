@@ -19,7 +19,6 @@ export interface Api {
   probeServers(): Promise<Server[]>;
   settings(): Promise<Settings>;
   setSettings(s: Settings): Promise<void>;
-  unblock(): Promise<void>;
   buildReport(windowMin: number, note: string, preview: boolean): Promise<ReportView>;
   revealReport(id: string): Promise<void>;
   discardReport(id: string): Promise<void>;
@@ -51,7 +50,6 @@ const wails: Api = {
   probeServers: () => call("ProbeServers"),
   settings: () => call("Settings"),
   setSettings: (s) => call("SetSettings", s),
-  unblock: () => call("Unblock"),
   buildReport: (w, note, preview) => call("BuildReport", w, note, preview),
   revealReport: (id) => call("RevealReport", id),
   discardReport: (id) => call("DiscardReport", id),

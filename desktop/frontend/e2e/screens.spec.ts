@@ -255,3 +255,20 @@ test("no tray: settings explains that closing quits", async ({ page }) => {
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByText(/No tray was found/)).toBeVisible();
 });
+
+test("changing a connection setting while connected shows the apply toast until disconnect", async ({ page }) => {
+  await open(page, "state=connected&freeze");
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("tab", { name: "Connection" }).click();
+  await expect(page.getByText("Changes apply the next time you connect.")).toHaveCount(0);
+  await page.getByRole("button", { name: "snowflake" }).click();
+  await expect(page.getByText("Changes apply the next time you connect.")).toBeVisible();
+});
+
+test("changing a connection setting while off shows no toast", async ({ page }) => {
+  await open(page, "state=off");
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("tab", { name: "Connection" }).click();
+  await page.getByRole("button", { name: "snowflake" }).click();
+  await expect(page.getByText("Changes apply the next time you connect.")).toHaveCount(0);
+});
