@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package ipc
 
 import (
@@ -24,7 +26,7 @@ const (
 	MethodRemoveRelay = "RemoveRelay"
 	MethodAds         = "Ads"
 	MethodLogout      = "Logout"
-	MethodReport      = "ReportDiagnostics"
+	MethodBuildReport = "BuildReport"
 	MethodProbe       = "ProbeServers"
 )
 
@@ -101,6 +103,6 @@ type Backend interface {
 	Ads(slot, relayID string) ([]Ad, error)
 	// Logout clears the invite/account from this device and stops any session.
 	Logout() error
-	// ReportDiagnostics submits a scrubbed support bundle (control or browser).
-	ReportDiagnostics() (ReportResult, error)
+	// BuildReport seals the recent scrubbed logs for the user to email.
+	BuildReport(BuildReportParams) (ReportResult, error)
 }

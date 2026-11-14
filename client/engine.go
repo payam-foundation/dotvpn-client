@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package client is the user-side engine: it keeps one live Session to a node,
 // choosing the carrier with a fallback ladder, and exposes it as a plain
 // DialContext to the local proxy and TUN fronts.

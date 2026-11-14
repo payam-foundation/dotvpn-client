@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package product holds client product helpers shared by the desktop helper
 // and the mobile AAR so invite/relay merge behavior cannot drift.
 package product

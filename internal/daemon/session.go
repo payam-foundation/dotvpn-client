@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package daemon owns one VPN session: the engine, the local proxy, the
 // optional full tunnel with its kill switch, byte counters and the state
 // machine a UI shows.
@@ -144,7 +146,7 @@ func (s *Session) Start(o Options) error {
 		// the client opens itself is pinned to the physical interface.
 		var err error
 		if bypass, err = tun.NewBypass(c.Tun.DNS); err != nil {
-			s.log.Error("bypass setup failed", "err", err, "dns", c.Tun.DNS)
+			s.log.Error("bypass setup failed", "err", err)
 			return fail(err)
 		}
 		opts.Control, opts.Resolver, opts.DNS = bypass.Control, bypass.Resolver(), c.Tun.DNS

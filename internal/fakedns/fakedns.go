@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package fakedns answers DNS queries for the full tunnel. Names that must go
 // through the tunnel get a synthetic address from a reserved pool, so the
 // flow that follows can be sent to the node by name and the (possibly

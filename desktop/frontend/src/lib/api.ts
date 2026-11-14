@@ -1,5 +1,5 @@
 import { Call, Clipboard, Events } from "@wailsio/runtime";
-import type { Account, Ad, AppError, ImportResult, Info, InviteResult, Prefs, Relay, ReportResult, Server, Settings, Status } from "./types";
+import type { Account, Ad, AppError, ImportResult, Info, InviteResult, Prefs, Relay, ReportView, Server, Settings, Status } from "./types";
 
 export type EventMap = {
   status: Status;
@@ -20,7 +20,9 @@ export interface Api {
   settings(): Promise<Settings>;
   setSettings(s: Settings): Promise<void>;
   unblock(): Promise<void>;
-  reportDiagnostics(): Promise<ReportResult>;
+  buildReport(windowMin: number, note: string, preview: boolean): Promise<ReportView>;
+  revealReport(id: string): Promise<void>;
+  discardReport(id: string): Promise<void>;
   installHelper(): Promise<void>;
   removeHelper(): Promise<void>;
   account(): Promise<Account>;
@@ -33,8 +35,6 @@ export interface Api {
   setPrefs(p: Prefs): Promise<void>;
   takeInvite(): Promise<InviteResult | null>;
   paste(): Promise<string>;
-  helperLogPath(): Promise<string>;
-  openHelperLog(): Promise<void>;
   on<K extends keyof EventMap>(name: K, cb: (data: EventMap[K]) => void): () => void;
 }
 
@@ -52,7 +52,9 @@ const wails: Api = {
   settings: () => call("Settings"),
   setSettings: (s) => call("SetSettings", s),
   unblock: () => call("Unblock"),
-  reportDiagnostics: () => call("ReportDiagnostics"),
+  buildReport: (w, note, preview) => call("BuildReport", w, note, preview),
+  revealReport: (id) => call("RevealReport", id),
+  discardReport: (id) => call("DiscardReport", id),
   installHelper: () => call("InstallHelper"),
   removeHelper: () => call("RemoveHelper"),
   account: () => call("Account"),
@@ -65,8 +67,6 @@ const wails: Api = {
   setPrefs: (p) => call("SetPrefs", p),
   takeInvite: () => call("TakeInvite"),
   paste: () => Clipboard.Text(),
-  helperLogPath: () => call("HelperLogPath"),
-  openHelperLog: () => call("OpenHelperLog"),
   on: (name, cb) => Events.On(name, (ev) => cb(ev.data)),
 };
 

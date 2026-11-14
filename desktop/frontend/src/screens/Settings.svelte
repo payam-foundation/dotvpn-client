@@ -1,10 +1,9 @@
 <script lang="ts">
-  import { Browser } from "@wailsio/runtime";
   import { api } from "../lib/api";
   import { app, type SettingsPage } from "../lib/app.svelte";
   import { t } from "../lib/i18n";
   import { parseEntries } from "../lib/validate";
-  import type { Lang, ReportResult, Theme } from "../lib/types";
+  import type { Lang, ReportView, Theme } from "../lib/types";
   import Icon from "../components/Icon.svelte";
   import Problem from "../components/Problem.svelte";
   import Segmented from "../components/Segmented.svelte";
@@ -34,37 +33,46 @@
     if (await app.run(() => api.unblock())) flash = "settings.unblocked";
   }
 
-  async function openHelperLog() {
-    const ok = await app.run(() => api.openHelperLog());
-    if (ok) flash = "settings.helperLogOpened";
+  let win = $state(60);
+  let note = $state("");
+  let preview = $state("");
+  let showPreview = $state(false);
+  let built = $state<ReportView | null>(null);
+
+  async function viewContents() {
+    if (showPreview) {
+      showPreview = false;
+      return;
+    }
+    const out: { v?: ReportView } = {};
+    if (!(await app.run(async () => void (out.v = await api.buildReport(win, note, true))))) return;
+    preview = out.v?.preview ?? "";
+    showPreview = true;
   }
 
-  async function copyHelperLogPath() {
-    const path = await api.helperLogPath();
-    if (!path) return;
+  async function createReport() {
+    const out: { v?: ReportView } = {};
+    if (!(await app.run(async () => void (out.v = await api.buildReport(win, note, false))))) return;
+    built = out.v ?? null;
+    if (built) await app.run(() => api.revealReport(built!.id));
+  }
+
+  async function copy(text: string) {
     try {
-      await navigator.clipboard.writeText(path);
-      flash = "settings.helperLogCopied";
+      await navigator.clipboard.writeText(text);
+      flash = "report.copied";
     } catch {
-      flash = "settings.helperLogPath";
+      /* clipboard denied; nothing else to do */
     }
   }
 
-  async function sendDiagnostics() {
-    const out: { result?: ReportResult } = {};
-    const ok = await app.run(async () => {
-      out.result = await api.reportDiagnostics();
-    });
-    const result = out.result;
-    if (!ok || !result) return;
-    flash = result.via === "control" ? "settings.reportOk" : "settings.reportBrowser";
-    if (result.via === "browser" && result.issueUrl) {
-      try {
-        await Browser.OpenURL(result.issueUrl);
-      } catch {
-        /* helper already returned the URL; flash still tells the user */
-      }
-    }
+  function closeReport() {
+    if (built) void api.discardReport(built.id);
+    built = null;
+    preview = "";
+    note = "";
+    showPreview = false;
+    app.reportOpen = false;
   }
 
   async function setPreset(preset: string) {
@@ -156,6 +164,38 @@
   <Problem />
   {#if flash}<p class="small" role="status">{t(lang, flash)}</p>{/if}
 
+  {#if app.reportOpen}
+    <div class="card report" role="dialog" aria-label={t(lang, "report.title")}>
+      <h2 class="small">{t(lang, "report.title")}</h2>
+      {#if built}
+        <p class="small">{t(lang, "report.steps", { id: built.id, address: built.address })}</p>
+        <div class="row-input">
+          <button class="btn quiet" onclick={() => copy(built!.address)}>{t(lang, "report.copyAddress")}</button>
+          <button class="btn quiet" onclick={() => copy(built!.armor ?? "")}>{t(lang, "report.copyArmor")}</button>
+        </div>
+      {:else}
+        <div class="pick">
+          <span class="small">{t(lang, "report.window")}</span>
+          <Segmented
+            value={String(win)}
+            options={[{ value: "30", label: t(lang, "report.w30") }, { value: "60", label: t(lang, "report.w60") }]}
+            label={t(lang, "report.window")}
+            onchange={(v) => ((win = Number(v)), (showPreview = false))}
+          />
+        </div>
+        <label class="add">
+          <span class="caption muted">{t(lang, "report.note")}</span>
+          <textarea class="field" rows="3" maxlength="1024" bind:value={note} onchange={() => (showPreview = false)}></textarea>
+        </label>
+        <button class="btn quiet" onclick={viewContents}>{t(lang, showPreview ? "report.hide" : "report.view")}</button>
+        {#if showPreview}<pre class="mono preview" dir="ltr">{preview}</pre>{/if}
+        <p class="caption muted">{t(lang, "report.consent")}</p>
+        <button class="btn block" onclick={createReport}>{t(lang, "report.create")}</button>
+      {/if}
+      <button class="btn quiet" onclick={closeReport}>{t(lang, "report.close")}</button>
+    </div>
+  {/if}
+
   {#if page === "app"}
     <div class="card">
       <Toggle checked={app.prefs.startAtLogin} label={t(lang, "settings.startAtLogin")} onchange={(v) => app.savePrefs({ startAtLogin: v })} />
@@ -181,11 +221,8 @@
     </div>
     {#if app.info.trayHidden}<p class="caption warning">{t(lang, "settings.noTray")}</p>{/if}
     <div class="card actions">
-      <button class="btn quiet block" onclick={sendDiagnostics}>{t(lang, "settings.report")}</button>
-      <p class="caption muted">{t(lang, "settings.reportHint")}</p>
-      <button class="btn quiet block" onclick={openHelperLog}>{t(lang, "settings.openHelperLog")}</button>
-      <button class="btn quiet block" onclick={copyHelperLogPath}>{t(lang, "settings.copyHelperLog")}</button>
-      <p class="caption muted">{t(lang, "settings.helperLogHint")}</p>
+      <button class="btn quiet block" onclick={() => (app.reportOpen = true)}>{t(lang, "report.title")}</button>
+      <p class="caption muted">{t(lang, "report.hint")}</p>
       <button class="btn quiet block" onclick={unblock} disabled={app.status.running}>{t(lang, "settings.unblock")}</button>
       <p class="caption muted">{t(lang, "settings.unblockHint")}</p>
     </div>
@@ -310,6 +347,8 @@
   .sub[aria-selected="true"] { color: var(--dot-fg); border-color: var(--dot-fg); background: color-mix(in srgb, var(--dot-fg) 4%, transparent); }
   hr { margin: 0; border: 0; border-top: 1px solid var(--dot-border); }
   .dns, .pick, .add { display: flex; flex-direction: column; gap: var(--dot-space-2); padding: var(--dot-space-3) var(--dot-space-4); }
+  .report { display: flex; flex-direction: column; gap: var(--dot-space-3); padding: var(--dot-space-4); }
+  .preview { max-height: 200px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; margin: 0; }
   .actions { padding: var(--dot-space-4); }
   .group { display: flex; flex-direction: column; gap: var(--dot-space-2); }
   .chips { display: flex; flex-wrap: wrap; gap: var(--dot-space-2); padding: var(--dot-space-3) var(--dot-space-4); }

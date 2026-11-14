@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package mobile is the gomobile surface of the client (ADR-025). The Android
 // VpnService owns the TUN device, routes, DNS and kill switch; this package
 // runs the engine and the gVisor front on the descriptor it hands over.
@@ -25,6 +27,7 @@ import (
 	"github.com/payam-foundation/dotvpn-client/internal/app"
 	"github.com/payam-foundation/dotvpn-client/internal/config"
 	"github.com/payam-foundation/dotvpn-client/internal/diag"
+	"github.com/payam-foundation/dotvpn-client/internal/report"
 	"github.com/payam-foundation/dotvpn-client/internal/router"
 	inttun "github.com/payam-foundation/dotvpn-client/internal/tun"
 	"github.com/payam-foundation/dotvpn-wire/invite"
@@ -216,7 +219,7 @@ func start(cfg, dataDir string, dev tun.Device, p Protector) error {
 	_ = c.Migrate() // mint device_id; Android should persist via NormalizeConfig
 	// Warn and above only: logcat is readable by other tools on rooted or
 	// debug devices, and Info lines name endpoints.
-	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	log := report.Tee(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	if c.Tun.KillSwitch {
 		log.Warn("guard ignored on mobile; use system Always-on block")
 	}
@@ -366,26 +369,36 @@ func formatConnected(info client.Info) string {
 	return fmt.Sprintf("connected %s|%s|%s|%s|%d|%d", kind, via, tier, rid, since, info.Latency.Milliseconds())
 }
 
-// ReportDiagnostics submits a scrubbed bundle to controlURL with accountKey
-// (from the invite config). Returns "url|via" for the Android UI.
-func ReportDiagnostics(cfgYAML, controlURL, accountKey string) (string, error) {
+// Report is a built report for the Android shell. Blob is the sealed file,
+// Armor its pasteable text form, Preview what the blob contains.
+type Report struct {
+	ID      string
+	Address string
+	Blob    []byte
+	Armor   string
+	Preview string
+}
+
+// BuildReport seals the recent scrubbed logs. metaJSON is a flat string map
+// of device facts (SDK, model, network type) from the shell; bad JSON is
+// ignored. With previewOnly only ID and Preview are filled.
+func BuildReport(metaJSON string, windowMin int, note string, previewOnly bool) (*Report, error) {
+	var meta map[string]string
+	_ = json.Unmarshal([]byte(metaJSON), &meta)
+	w := time.Duration(windowMin) * time.Minute
+	if w <= 0 || w > report.RingMaxAge {
+		w = report.RingMaxAge
+	}
 	mobileRing.SetVersion(appVersion)
 	mobileRing.SetState(coarseState(Status()))
-	b := mobileRing.Snapshot()
-	if controlURL == "" || accountKey == "" {
-		if c, err := config.Parse([]byte(cfgYAML)); err == nil {
-			accountKey = c.Account
-			if len(c.Control) > 0 {
-				controlURL = c.Control[0].URL
-			}
-		}
-	}
-	sub := &diag.ClientSubmit{ControlURL: controlURL, AccountKey: accountKey}
-	res, err := sub.Submit(context.Background(), b)
+	r, err := report.Build(report.Options{
+		Window: w, Note: note, Meta: meta, Logs: report.Logs,
+		Events: mobileRing.Snapshot(), PreviewOnly: previewOnly,
+	})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return res.IssueURL + "|" + res.Via, nil
+	return &Report{ID: r.ID, Address: report.Address, Blob: r.Blob, Armor: r.Armor, Preview: r.Preview}, nil
 }
 
 // coarseState strips carrier names and error text from Status() for L0.

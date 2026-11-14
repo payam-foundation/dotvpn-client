@@ -41,6 +41,8 @@ class App {
   view = $state<View>("home");
   settingsPage = $state<SettingsPage>("app");
   pickerOpen = $state(false);
+  /** Report-a-problem dialog in Settings. */
+  reportOpen = $state(false);
   /** Wall clock, ticking once a second so uptime moves. */
   now = $state(Date.now());
   /** A failed action, shown inline where it happened. */
@@ -48,6 +50,13 @@ class App {
   notice = $state("");
 
   #last: Counters | null = null;
+
+  /** Jump to the report dialog (from a connect failure). */
+  openReport(): void {
+    this.view = "settings";
+    this.settingsPage = "app";
+    this.reportOpen = true;
+  }
 
   get lang(): Lang {
     return this.prefs.language || "en";
