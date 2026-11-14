@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0](https://github.com/payam-foundation/dotvpn-client/compare/v0.4.0...v0.5.0) (2026-11-14)
+
+
+### Features
+
+* **client:** implement two-phase tiered connection racing ([#24](https://github.com/payam-foundation/dotvpn-client/issues/24)) ([9151ac3](https://github.com/payam-foundation/dotvpn-client/commit/9151ac36511085104b049d22b73fca60b1737051))
+* **client:** roaming recovery and latency-ordered ladder ([#32](https://github.com/payam-foundation/dotvpn-client/issues/32)) ([849c87c](https://github.com/payam-foundation/dotvpn-client/commit/849c87c8bbf3aa1017120886f552d7f16e6f7b8b))
+* sealed email problem reports and log ring scrubber ([#23](https://github.com/payam-foundation/dotvpn-client/issues/23)) ([8222a1a](https://github.com/payam-foundation/dotvpn-client/commit/8222a1a0275e902875f1c4f2add81e1eec59a355))
+
+
+### Bug Fixes
+
+* **desktop:** tidy Settings copy, boxes and apply notice ([#31](https://github.com/payam-foundation/dotvpn-client/issues/31)) ([016f5bf](https://github.com/payam-foundation/dotvpn-client/commit/016f5bfc19781631df0fc6b1cbd50f5f46179a34))
+
 ## [0.4.0](https://github.com/payam-foundation/dotvpn-client/compare/v0.3.0...v0.4.0) (2026-11-13)
 
 
