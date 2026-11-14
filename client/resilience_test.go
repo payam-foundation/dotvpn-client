@@ -72,7 +72,7 @@ func TestEngineRejectsDeadDataPlane(t *testing.T) {
 		Stagger:     5 * time.Millisecond,
 		ProbeTarget: DefaultProbeTarget,
 	})
-	defer e.Close()
+	defer func() { _ = e.Close() }()
 	c, err := e.DialContext(context.Background(), "tcp", "example.com:443")
 	if err != nil {
 		t.Fatal(err)
@@ -121,7 +121,7 @@ func TestPersistedEndpointSkipsRace(t *testing.T) {
 	// Seed as if a previous run ended on the second endpoint.
 	_ = st.Save(State{Key: key(eps[1]), Addr: "b:443", At: time.Now()})
 	e := NewEngine(cfg)
-	defer e.Close()
+	defer func() { _ = e.Close() }()
 	c, err := e.DialContext(context.Background(), "tcp", "x:1")
 	if err != nil {
 		t.Fatal(err)
@@ -149,7 +149,7 @@ func TestPersistedEndpointFailsOverToLadder(t *testing.T) {
 		Endpoints: eps, Dialers: map[transport.Kind]transport.Dialer{transport.KindH2: d},
 		Token: func() string { return "t" }, Stagger: 5 * time.Millisecond, Store: st,
 	})
-	defer e.Close()
+	defer func() { _ = e.Close() }()
 	c, err := e.DialContext(context.Background(), "tcp", "x:1")
 	if err != nil {
 		t.Fatal(err)
@@ -217,7 +217,7 @@ func TestTieredRacingPrefersDirectOverRelay(t *testing.T) {
 		Stagger:     5 * time.Millisecond,
 		ProbeTarget: DefaultProbeTarget,
 	})
-	defer e.Close()
+	defer func() { _ = e.Close() }()
 	c, err := e.DialContext(context.Background(), "tcp", "example.com:443")
 	if err != nil {
 		t.Fatal(err)
@@ -257,7 +257,7 @@ func TestTieredRacingFallsBackToRelay(t *testing.T) {
 		Stagger:     5 * time.Millisecond,
 		ProbeTarget: DefaultProbeTarget,
 	})
-	defer e.Close()
+	defer func() { _ = e.Close() }()
 	c, err := e.DialContext(context.Background(), "tcp", "example.com:443")
 	if err != nil {
 		t.Fatal(err)

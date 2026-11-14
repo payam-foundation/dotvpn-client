@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"sort"
 	"sync"
 	"time"
 
@@ -67,11 +68,25 @@ type Engine struct {
 	since    time.Time
 	health   map[string]epHealth
 
+	// netGen counts physical network changes; knowledge learned under an
+	// older generation (cool-downs, latencies) no longer applies.
+	netGen     uint64
+	roam       *time.Timer        // pending debounced NetworkChanged
+	cancelRace context.CancelFunc // aborts the connect in flight
+
+	wake chan struct{} // signals Keep after a roam
+
 	connMu sync.Mutex
 	closed bool
 }
 
-const maxCooldown = 30 * time.Minute
+var errNetworkChanged = errors.New("client: network changed while connecting")
+
+const (
+	maxCooldown = 30 * time.Minute
+	// roamDebounce coalesces the burst of callbacks a single roam raises.
+	roamDebounce = 750 * time.Millisecond
+)
 
 // NewEngine builds an Engine; call Run to start the fallback ladder.
 func NewEngine(c EngineConfig) *Engine {
@@ -87,6 +102,7 @@ func NewEngine(c EngineConfig) *Engine {
 	e := &Engine{
 		cfg: c, eps: c.Endpoints,
 		cooldown: map[string]time.Time{}, fails: map[string]int{}, health: map[string]epHealth{},
+		wake: make(chan struct{}, 1),
 	}
 	if c.Store != nil {
 		if st := c.Store.Load(); st.Key != "" {
@@ -118,6 +134,9 @@ func (e *Engine) Status() string {
 func (e *Engine) Close() error {
 	e.mu.Lock()
 	e.closed = true
+	if e.roam != nil {
+		e.roam.Stop()
+	}
 	s := e.sess
 	e.sess = nil
 	e.mu.Unlock()
@@ -210,6 +229,51 @@ func (e *Engine) DialPacket(ctx context.Context, addr string) (net.Conn, error) 
 	return nil, lastErr
 }
 
+// NetworkChanged tells the engine the physical network changed (Wi-Fi to
+// cellular, new gateway). Bursts are coalesced. The live session is closed
+// without penalising its endpoint, what was learned about the old network is
+// forgotten, and Keep reconnects at once.
+func (e *Engine) NetworkChanged() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return
+	}
+	if e.roam != nil {
+		e.roam.Stop()
+	}
+	e.roam = time.AfterFunc(roamDebounce, e.roamed)
+}
+
+func (e *Engine) roamed() {
+	e.mu.Lock()
+	if e.closed {
+		e.mu.Unlock()
+		return
+	}
+	e.netGen++
+	clear(e.cooldown)
+	clear(e.fails)
+	e.fast = false
+	s, cancel := e.sess, e.cancelRace
+	e.sess = nil
+	e.mu.Unlock()
+	e.cfg.Log.Info("network changed")
+	if cancel != nil {
+		cancel()
+	}
+	if s != nil {
+		_ = s.Close()
+	}
+	e.notify()
+}
+
+func (e *Engine) generation() uint64 {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.netGen
+}
+
 func (e *Engine) drop(s transport.Session) {
 	dropped := false
 	e.mu.Lock()
@@ -242,11 +306,22 @@ func (e *Engine) session(ctx context.Context) (transport.Session, error) {
 	if closed {
 		return nil, errors.New("client: engine closed")
 	}
-	s, ep, err := e.race(ctx)
+	rctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	e.mu.Lock()
+	e.cancelRace = cancel
+	gen := e.netGen
+	e.mu.Unlock()
+	s, ep, err := e.race(rctx)
 	if err != nil {
 		return nil, err
 	}
 	e.mu.Lock()
+	if e.netGen != gen { // the network changed while this session was dialling
+		e.mu.Unlock()
+		_ = s.Close()
+		return nil, errNetworkChanged
+	}
 	e.sess, e.cur, e.prefer, e.since = s, ep, key(ep), time.Now()
 	delete(e.fails, key(ep))
 	delete(e.cooldown, key(ep))
@@ -384,6 +459,15 @@ func (e *Engine) order(eps []transport.Endpoint, skipCool bool) []transport.Endp
 			mid = append(mid, ep)
 		}
 	}
+	gen := e.netGen
+	fresh := func(ep transport.Endpoint) bool { return e.health[key(ep)].fresh(gen, now) }
+	sort.SliceStable(mid, func(i, j int) bool { // fresh and fast first, unknown keeps config order
+		fi, fj := fresh(mid[i]), fresh(mid[j])
+		if fi && fj {
+			return e.health[key(mid[i])].latency < e.health[key(mid[j])].latency
+		}
+		return fi && !fj
+	})
 	out := append(first, mid...)
 	if !skipCool || len(out) == 0 {
 		out = append(out, cool...)
@@ -417,10 +501,10 @@ const fastPathBudget = 6 * time.Second
 // dialVerified dials ep and, when ProbeTarget is set, proves the data plane
 // before reporting success.
 func (e *Engine) dialVerified(ctx context.Context, ep transport.Endpoint) (transport.Session, error) {
-	start := time.Now()
+	start, gen := time.Now(), e.generation()
 	s, err := e.dialProbed(ctx, ep)
 	if ctx.Err() == nil || err == nil { // a rung cancelled by the race winner says nothing about its health
-		e.record(ep, time.Since(start), err)
+		e.record(ep, time.Since(start), err, gen)
 	}
 	return s, err
 }
@@ -542,10 +626,12 @@ func (e *Engine) raceTier(ctx context.Context, tier []transport.Endpoint, stagge
 				return r.s, r.ep, nil
 			}
 			e.cfg.Log.Debug("endpoint failed", "endpoint", r.ep.Label(), "err", r.err)
-			e.mu.Lock()
-			e.markCoolLocked(key(r.ep))
-			e.mu.Unlock()
-			e.persistCool()
+			if ctx.Err() == nil { // an attempt cancelled by a roam is not an endpoint fault
+				e.mu.Lock()
+				e.markCoolLocked(key(r.ep))
+				e.mu.Unlock()
+				e.persistCool()
+			}
 			errs = append(errs, fmt.Errorf("%s: %w", r.ep.Label(), r.err))
 			if received == len(tier) {
 				return nil, transport.Endpoint{}, fmt.Errorf("tier failed: %w", errors.Join(errs...))

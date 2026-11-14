@@ -271,38 +271,15 @@ func start(cfg, dataDir string, dev tun.Device, p Protector) error {
 		}
 		mu.Unlock()
 	}()
-	go keepConnected(ctx, eng)
-	return nil
-}
-
-// keepConnected reconnects whenever the session drops (network change,
-// airplane mode) instead of waiting for the next flow to trigger it.
-// Backoff grows from 1s to 30s on failure (aligned with desktop connectLoop).
-func keepConnected(ctx context.Context, eng *client.Engine) {
-	backoff := time.Second
-	for ctx.Err() == nil {
-		if err := eng.Connect(ctx); err != nil {
+	go eng.Keep(ctx, client.Hooks{
+		OnFail: func(error, time.Duration) {
 			mobileRing.Note(diag.Event{Code: diag.CodeConnectFail, Detail: "retry"})
-			select {
-			case <-ctx.Done():
-			case <-time.After(backoff):
-			}
-			if backoff < 30*time.Second {
-				backoff *= 2
-				if backoff > 30*time.Second {
-					backoff = 30 * time.Second
-				}
-			}
-			continue
-		}
-		backoff = time.Second
-		info := eng.Info()
-		mobileRing.Note(diag.Event{Code: diag.CodeConnectOK, EndpointID: client.EndpointID(info.Endpoint)})
-		select {
-		case <-ctx.Done():
-		case <-time.After(2 * time.Second):
-		}
-	}
+		},
+		OnUp: func(i client.Info) {
+			mobileRing.Note(diag.Event{Code: diag.CodeConnectOK, EndpointID: client.EndpointID(i.Endpoint)})
+		},
+	})
+	return nil
 }
 
 // ensureDNSPort appends :53 when dns is a bare IP or hostname.
@@ -328,6 +305,19 @@ func Stop() {
 	mobileRing.Note(diag.Event{Code: diag.CodeStop})
 	s.cancel()
 	<-s.done
+}
+
+// NetworkChanged tells the running engine the physical network changed (Wi-Fi
+// to cellular, a new Wi-Fi). It reconnects within about a second instead of
+// waiting for the dead session to be noticed. Call it from the platform's
+// network callback; it is a no-op while off.
+func NetworkChanged() {
+	mu.Lock()
+	s := cur
+	mu.Unlock()
+	if s != nil {
+		s.eng.NetworkChanged()
+	}
 }
 
 // Status is "off", "connecting", "error: <reason>", or when connected:
