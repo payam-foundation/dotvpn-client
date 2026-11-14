@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"sort"
 	"sync"
 	"time"
 
@@ -458,6 +459,15 @@ func (e *Engine) order(eps []transport.Endpoint, skipCool bool) []transport.Endp
 			mid = append(mid, ep)
 		}
 	}
+	gen := e.netGen
+	fresh := func(ep transport.Endpoint) bool { return e.health[key(ep)].fresh(gen, now) }
+	sort.SliceStable(mid, func(i, j int) bool { // fresh and fast first, unknown keeps config order
+		fi, fj := fresh(mid[i]), fresh(mid[j])
+		if fi && fj {
+			return e.health[key(mid[i])].latency < e.health[key(mid[j])].latency
+		}
+		return fi && !fj
+	})
 	out := append(first, mid...)
 	if !skipCool || len(out) == 0 {
 		out = append(out, cool...)
@@ -491,10 +501,10 @@ const fastPathBudget = 6 * time.Second
 // dialVerified dials ep and, when ProbeTarget is set, proves the data plane
 // before reporting success.
 func (e *Engine) dialVerified(ctx context.Context, ep transport.Endpoint) (transport.Session, error) {
-	start := time.Now()
+	start, gen := time.Now(), e.generation()
 	s, err := e.dialProbed(ctx, ep)
 	if ctx.Err() == nil || err == nil { // a rung cancelled by the race winner says nothing about its health
-		e.record(ep, time.Since(start), err)
+		e.record(ep, time.Since(start), err, gen)
 	}
 	return s, err
 }

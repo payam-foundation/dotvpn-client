@@ -43,6 +43,22 @@ type Health struct {
 type epHealth struct {
 	latency time.Duration
 	err     string
+	at      time.Time
+	gen     uint64 // netGen the reading was taken under
+}
+
+const (
+	// latencyTTL is how long a reading orders the ladder.
+	latencyTTL = 10 * time.Minute
+	// warmMax and warmConc bound the background probe.
+	warmMax  = 4
+	warmConc = 2
+)
+
+// fresh reports whether h is a success from this network generation, recent
+// enough to rank by.
+func (h epHealth) fresh(gen uint64, now time.Time) bool {
+	return h.err == "" && h.latency > 0 && h.gen == gen && now.Sub(h.at) < latencyTTL
 }
 
 // Info returns the live session, or Connected=false.
@@ -74,10 +90,11 @@ func (e *Engine) Health() []Health {
 	return out
 }
 
-func (e *Engine) record(ep transport.Endpoint, d time.Duration, err error) {
-	h := epHealth{latency: d}
+// record stores a reading taken under network generation gen.
+func (e *Engine) record(ep transport.Endpoint, d time.Duration, err error, gen uint64) {
+	h := epHealth{latency: d, at: time.Now(), gen: gen}
 	if err != nil {
-		h = epHealth{err: err.Error()}
+		h = epHealth{err: err.Error(), at: h.at, gen: gen}
 	}
 	e.mu.Lock()
 	e.health[key(ep)] = h
@@ -88,21 +105,57 @@ func (e *Engine) record(ep transport.Endpoint, d time.Duration, err error) {
 // Sessions from the probe are closed; the live session is left alone.
 func (e *Engine) ProbeAll(ctx context.Context) {
 	eps := e.expand(ctx, false)
-	seen := map[string]bool{}
-	for _, ep := range eps {
-		seen[key(ep)] = true
+	gen := e.generation()
+	e.recordProbe(eps, Probe(ctx, eps, e.cfg.Dialers, e.cfg.Token, e.cfg.ProbeTarget, 4), gen)
+}
+
+// Warm times the next-best rungs with handshake-only dials so a failover on
+// this network picks the fastest one directly. It probes at most warmMax
+// stale, non-cool rungs other than the live one, warmConc at a time, and does
+// nothing when they are all fresh.
+//
+// ponytail: handshake time and the data-plane latency recorded by a real
+// connect share one scale. Split them if the ranking proves skewed.
+func (e *Engine) Warm(ctx context.Context) {
+	gen := e.generation()
+	now := time.Now()
+	e.mu.Lock()
+	live := ""
+	if e.sess != nil && e.sess.Alive() {
+		live = key(e.cur)
 	}
-	ranked := Probe(ctx, eps, e.cfg.Dialers, e.cfg.Token, e.cfg.ProbeTarget, 4)
+	e.mu.Unlock()
+	var eps []transport.Endpoint
+	for _, ep := range e.ladder() {
+		e.mu.Lock()
+		skip := key(ep) == live || e.health[key(ep)].fresh(gen, now)
+		e.mu.Unlock()
+		if !skip && len(eps) < warmMax {
+			eps = append(eps, ep)
+		}
+	}
+	if len(eps) == 0 {
+		return
+	}
+	ranked := Probe(ctx, eps, e.cfg.Dialers, e.cfg.Token, "", warmConc)
+	if ctx.Err() != nil { // cut short: the misses are not failures
+		return
+	}
+	e.recordProbe(eps, ranked, gen)
+}
+
+// recordProbe stores a probe round: ranked rungs get their latency, the rest
+// are marked failed.
+func (e *Engine) recordProbe(eps []transport.Endpoint, ranked []Ranked, gen uint64) {
 	ok := map[string]bool{}
 	for _, r := range ranked {
-		e.record(r.Endpoint, r.Total(), nil)
+		e.record(r.Endpoint, r.Total(), nil, gen)
 		ok[key(r.Endpoint)] = true
 	}
 	for _, ep := range eps {
-		if ok[key(ep)] {
-			continue
+		if !ok[key(ep)] {
+			e.record(ep, 0, errProbeFailed, gen)
 		}
-		e.record(ep, 0, errProbeFailed)
 	}
 }
 

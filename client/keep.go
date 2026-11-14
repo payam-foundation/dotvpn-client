@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"math/rand/v2"
 	"time"
 )
 
@@ -72,17 +73,33 @@ func (e *Engine) Keep(ctx context.Context, h Hooks) {
 		// ponytail: a session that dies silently raises no wake, so Alive is
 		// also polled every 2s. Add an Alive channel to transport.Session if
 		// that latency matters.
+		wctx, stopWarm := context.WithCancel(ctx)
+		go e.warmLater(wctx)
 		tick := time.NewTicker(2 * time.Second)
 		for e.Info().Connected {
 			select {
 			case <-ctx.Done():
 				tick.Stop()
+				stopWarm()
 				return
 			case <-e.wake:
 			case <-tick.C:
 			}
 		}
 		tick.Stop()
+		stopWarm()
 		call(h.OnDrop)
+	}
+}
+
+// warmLater runs Warm once, 2-5s after a connect so it does not compete with
+// the tunnel coming up. ctx ends it with the session.
+func (e *Engine) warmLater(ctx context.Context) {
+	t := time.NewTimer(2*time.Second + rand.N(3*time.Second))
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+	case <-t.C:
+		e.Warm(ctx)
 	}
 }
