@@ -27,6 +27,7 @@ import (
 	"github.com/payam-foundation/dotvpn-client/internal/config"
 	"github.com/payam-foundation/dotvpn-client/internal/diag"
 	"github.com/payam-foundation/dotvpn-client/internal/ipc"
+	"github.com/payam-foundation/dotvpn-client/internal/netwatch"
 	"github.com/payam-foundation/dotvpn-client/internal/router"
 	"github.com/payam-foundation/dotvpn-client/internal/tun"
 	"github.com/payam-foundation/dotvpn-wire/transport"
@@ -195,6 +196,13 @@ func (s *Session) main(ctx context.Context, r *runState, o Options, opts transpo
 	// (and OS DNS briefly points at 198.18.0.2). Bypass keeps later
 	// client sockets on the physical iface once the tunnel is up.
 	spawn(func() error { return s.connectLoop(ctx, o, opts, ctl) })
+	if bypass != nil { // proxy-only sessions hold no tunnel to repair
+		go netwatch.Watch(ctx, func() {
+			if eng := s.engine(); eng != nil {
+				eng.NetworkChanged()
+			}
+		})
+	}
 	if bypass != nil {
 		spawn(func() error {
 			if err := s.waitEngineLinked(ctx); err != nil {
