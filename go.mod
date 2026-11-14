@@ -76,7 +76,7 @@ require (
 	github.com/Microsoft/go-winio v0.6.2
 	github.com/getsentry/sentry-go v0.50.0
 	github.com/miekg/dns v1.1.73
-	github.com/payam-foundation/dotvpn-wire v0.5.0
+	github.com/payam-foundation/dotvpn-wire v0.6.0
 	github.com/payam-foundation/log-decypher v0.1.0
 	golang.org/x/mobile v0.0.0-20261011034528-197770444867
 	golang.org/x/sys v0.49.0
