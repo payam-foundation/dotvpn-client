@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // dotvpn is the client: a local SOCKS5/HTTP proxy and an optional full tunnel.
 package main
 
@@ -16,6 +18,7 @@ import (
 	"github.com/payam-foundation/dotvpn-client/internal/config"
 	"github.com/payam-foundation/dotvpn-client/internal/daemon"
 	"github.com/payam-foundation/dotvpn-client/internal/ipc"
+	"github.com/payam-foundation/dotvpn-client/internal/report"
 	"github.com/payam-foundation/dotvpn-client/internal/tun"
 	"github.com/payam-foundation/dotvpn-wire/invite"
 )
@@ -59,7 +62,7 @@ func run(ctx context.Context, args []string) error {
 	if *verbose {
 		lvl = slog.LevelDebug
 	}
-	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: lvl}))
+	log := report.Tee(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: lvl}))
 	slog.SetDefault(log)
 	if *unblock {
 		return tun.Unblock(log)

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package helper is the privileged side of the app: it owns the config file
 // and one daemon.Session, and implements ipc.Backend so the GUI and CLI can
 // drive them without ever seeing a token or a node address.
@@ -21,6 +23,7 @@ import (
 	"github.com/payam-foundation/dotvpn-client/internal/daemon"
 	"github.com/payam-foundation/dotvpn-client/internal/diag"
 	"github.com/payam-foundation/dotvpn-client/internal/ipc"
+	"github.com/payam-foundation/dotvpn-client/internal/report"
 	"github.com/payam-foundation/dotvpn-client/internal/tun"
 	"github.com/payam-foundation/dotvpn-wire/invite"
 	"github.com/payam-foundation/dotvpn-wire/transport"
@@ -488,31 +491,21 @@ func (h *Helper) SetSettings(s ipc.Settings) error {
 	return nil
 }
 
-// ReportDiagnostics submits a scrubbed L0 snapshot via control or browser.
-func (h *Helper) ReportDiagnostics() (ipc.ReportResult, error) {
-	base, key, _, err := h.controlCreds()
-	if err != nil {
-		// Still allow browser fallback without control.
-		base, key = "", ""
+// BuildReport seals the last scrubbed log window. The ring lives in this
+// process, so a helper restart empties it; ring_started says how much there is.
+func (h *Helper) BuildReport(p ipc.BuildReportParams) (ipc.ReportResult, error) {
+	w := time.Duration(p.WindowMin) * time.Minute
+	if w <= 0 || w > report.RingMaxAge {
+		w = report.RingMaxAge
 	}
-	st := h.sess.Snapshot()
-	h.ring.SetState(string(st.State))
-	b := h.ring.Snapshot()
-	sub := &diag.ClientSubmit{
-		ControlURL: base,
-		AccountKey: key,
-		OpenURL: func(u string) error {
-			// Best-effort: GUI also shows the URL; helper may not open a browser.
-			h.log.Info("ready", "report", "browser")
-			_ = u
-			return nil
-		},
-	}
-	res, err := sub.Submit(context.Background(), b)
+	h.ring.SetState(string(h.sess.Snapshot().State))
+	r, err := report.Build(report.Options{
+		Window: w, Note: p.Note, Logs: report.Logs, Events: h.ring.Snapshot(), PreviewOnly: p.Preview,
+	})
 	if err != nil {
 		return ipc.ReportResult{}, err
 	}
-	return ipc.ReportResult{IssueURL: res.IssueURL, Via: res.Via}, nil
+	return ipc.ReportResult{ID: r.ID, Blob: r.Blob, Preview: r.Preview}, nil
 }
 
 // dnsForPreset maps a UI preset to the stored DNS field. For "system" the

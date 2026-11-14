@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package tun
 
 import (
@@ -114,3 +116,7 @@ func (b *Bypass) DialContext(ctx context.Context, network, addr string) (net.Con
 	d.Resolver = b.resolver
 	return d.DialContext(ctx, network, addr)
 }
+
+// DefaultGateway is the physical IPv4 default gateway, or nil where it cannot
+// be read. Our own routes are two /1s, so the physical default stays visible.
+func DefaultGateway() net.IP { return defaultGateway4() }

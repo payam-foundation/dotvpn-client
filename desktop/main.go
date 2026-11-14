@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Command dotvpn-desktop is the Dot VPN window and tray icon. It runs as the
 // logged-in user and holds no VPN logic: it talks to the privileged helper
 // (dotvpn daemon) over internal/ipc, the same way the dotvpn CLI does.

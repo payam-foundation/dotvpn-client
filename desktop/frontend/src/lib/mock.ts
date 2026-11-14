@@ -144,10 +144,16 @@ export const mockApi: Api = {
   },
   settings: async () => structuredClone(settings),
   setSettings: async (s) => {
-    settings = structuredClone(s);
+    settings = JSON.parse(JSON.stringify(s));
   },
-  unblock: async () => {},
-  reportDiagnostics: async () => ({ issueUrl: "https://github.com/payam-foundation/dotvpn-client/issues/new", via: "browser" }),
+  buildReport: async (_w, _note, preview) => ({
+    id: "K7MQ2XAB",
+    address: "report@dotvpn.org",
+    preview: "project: dotvpn\nkind: report\n\n[log]\n12:00:01 INFO connect failed host=<host> ip=<ip>",
+    ...(preview ? {} : { armor: "-----BEGIN LOG-----\nMOCK\n-----END LOG-----" }),
+  }),
+  revealReport: async () => {},
+  discardReport: async () => {},
   installHelper: async () => {
     await new Promise((r) => setTimeout(r, frozen ? 60_000 : 600));
     helper = true;
@@ -190,8 +196,6 @@ export const mockApi: Api = {
     emit("prefs", prefs);
   },
   takeInvite: async (): Promise<InviteResult | null> => null,
-  helperLogPath: async () => "/var/log/dotvpn.log",
-  openHelperLog: async () => {},
   paste: async () => "dv://eyJ2IjoxLCJub2RlIjoiZXhhbXBsZS5jb20iLCJrZXkiOiJBYkNkRWZHaElqS2xNbk9wIn0",
   on: (name, cb) => {
     const set = listeners[name] as Set<typeof cb>;

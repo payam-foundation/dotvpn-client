@@ -8,6 +8,8 @@ Use GitHub private vulnerability reporting: <https://github.com/payam-foundation
 
 Do not open a public issue for a vulnerability. Include the affected version, a reproduction, and the impact you expect. We aim to acknowledge reports within 72 hours.
 
+Problem reports are sealed. Do not paste logs into public issues; use "Report a problem" in the app and email the file to report@dotvpn.org.
+
 ## Supported versions
 
 Only the latest tagged release of each repository receives security fixes. A wire major version bump is a coordinated release of every component (see `dotvpn-wire`).

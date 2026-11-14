@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package tun
 
 import (
@@ -102,7 +104,7 @@ func pinHostRoutes(u *undo, c sysConfig) error {
 			[]string{"route", "-n", "delete", "-host", host, gw},
 			"route", "-n", "add", "-host", host, gw,
 		); err != nil {
-			c.Log.Warn("pin host route failed", "host", host, "gateway", gw, "err", err)
+			c.Log.Warn("pin host route failed", "err", err)
 		}
 	}
 	return nil

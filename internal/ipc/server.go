@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package ipc
 
 import (
@@ -164,8 +166,12 @@ func (s *server) call(req request) (any, error) {
 		return nil, b.RemoveRelay(id)
 	case MethodLogout:
 		return nil, b.Logout()
-	case MethodReport:
-		return b.ReportDiagnostics()
+	case MethodBuildReport:
+		var p BuildReportParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			return nil, err
+		}
+		return b.BuildReport(p)
 	}
 	return nil, errors.New("unknown method " + req.Method)
 }

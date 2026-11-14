@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package leak builds the kill-switch rule sets for every OS as plain data, so
 // the invariants that stop leaks (default deny, IPv6 closed, only our own
 // sockets and the LAN allowed out) are unit-tested on any host. The sys_*
