@@ -49,6 +49,9 @@
         <Settings />
       {/if}
     </main>
+    {#if app.pendingApply}
+      <p class="toast small" role="status">{t(lang, "settings.applyNext")}</p>
+    {/if}
     {#if !firstRun}
       <nav aria-label="Dot VPN">
         {#each tabs as tab}
@@ -66,6 +69,10 @@
   .shell { height: 100%; display: flex; flex-direction: column; max-width: 680px; margin: 0 auto; }
   main { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; user-select: none; }
   main > :global(section) { flex: 1; }
+  .toast {
+    margin: 0 var(--dot-space-4) var(--dot-space-3); padding: var(--dot-space-3) var(--dot-space-4);
+    background: var(--dot-surface-2); border: 1px solid var(--dot-border); border-radius: var(--dot-radius-md);
+  }
   nav {
     display: flex; border-top: 1px solid var(--dot-border);
     background: color-mix(in srgb, var(--dot-bg) 92%, transparent);

@@ -93,9 +93,11 @@ export interface Settings {
   crashReporting?: boolean;
 }
 
-export interface ReportResult {
-  issueUrl: string;
-  via: string;
+export interface ReportView {
+  id: string;
+  address: string;
+  preview?: string;
+  armor?: string;
 }
 
 export type Lang = "en" | "fa";

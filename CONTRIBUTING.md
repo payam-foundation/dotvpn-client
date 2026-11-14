@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping. dotvpn is source-available under the PolyForm Noncommercial License 1.0.0 (see `LICENSE`).
+Thanks for helping. dotvpn-client is free software under the GNU Affero General Public License v3.0 only (see `LICENSE`).
 
 ## Ground rules
 

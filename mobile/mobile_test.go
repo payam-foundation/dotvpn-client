@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package mobile
 
 import (
@@ -109,5 +111,19 @@ func TestProbeHealthCarriesCountry(t *testing.T) {
 	}})
 	if err != nil || !strings.Contains(raw, `"country":"DE"`) {
 		t.Fatalf("probe json = %s, %v", raw, err)
+	}
+}
+
+func TestBuildReport(t *testing.T) {
+	r, err := BuildReport(`{"sdk":"34"}`, 30, "note", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.ID) != 8 || len(r.Blob) == 0 || r.Armor == "" || r.Address != "report@dotvpn.org" {
+		t.Fatalf("bad report: %+v", r)
+	}
+	p, err := BuildReport("not json", 0, "", true)
+	if err != nil || len(p.Blob) != 0 || p.Preview == "" {
+		t.Fatalf("preview: %+v %v", p, err)
 	}
 }
