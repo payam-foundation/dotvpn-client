@@ -112,7 +112,12 @@ type errString string
 
 func (e errString) Error() string { return string(e) }
 
+// notify wakes Keep and reports the new Info to OnState.
 func (e *Engine) notify() {
+	select {
+	case e.wake <- struct{}{}:
+	default:
+	}
 	if e.cfg.OnState != nil {
 		e.cfg.OnState(e.Info())
 	}

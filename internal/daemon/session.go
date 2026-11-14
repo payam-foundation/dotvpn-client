@@ -49,7 +49,7 @@ var ErrRunning = errors.New("daemon: already running")
 var ErrNotConfigured = errors.New("daemon: no endpoints: import an invite or configure endpoints")
 
 // engineFunc builds the engine; tests replace it.
-type engineFunc func(ctx context.Context, o Options, opts transport.Options, ctl *http.Client, onState func(client.Info)) (*client.Engine, error)
+type engineFunc func(ctx context.Context, o Options, opts transport.Options, ctl *http.Client) (*client.Engine, error)
 
 // Session runs at most one connection at a time and can be restarted.
 type Session struct {
@@ -58,7 +58,6 @@ type Session struct {
 
 	up, down atomic.Uint64
 	tunUp    atomic.Bool
-	wake     chan struct{}
 
 	mu     sync.Mutex
 	run    *runState // nil when not running
@@ -92,10 +91,9 @@ type runState struct {
 func New(log *slog.Logger) *Session {
 	return &Session{
 		log:  log,
-		wake: make(chan struct{}, 1),
 		subs: map[chan ipc.Status]struct{}{},
-		build: func(ctx context.Context, o Options, opts transport.Options, ctl *http.Client, onState func(client.Info)) (*client.Engine, error) {
-			return app.NewEngine(ctx, app.Params{Config: o.Config, Dir: o.Dir, Opts: opts, HTTP: ctl, OnState: onState, Log: log})
+		build: func(ctx context.Context, o Options, opts transport.Options, ctl *http.Client) (*client.Engine, error) {
+			return app.NewEngine(ctx, app.Params{Config: o.Config, Dir: o.Dir, Opts: opts, HTTP: ctl, Log: log})
 		},
 	}
 }
@@ -249,82 +247,64 @@ func (s *Session) main(ctx context.Context, r *runState, o Options, opts transpo
 	close(r.done)
 }
 
-// connectLoop builds the engine and keeps it connected: first connect, retry
-// after failure with backoff, reconnect after a drop.
+// connectLoop builds the engine and hands it to Engine.Keep, which owns
+// connecting, backoff and reconnecting; the hooks mirror it into link state.
 func (s *Session) connectLoop(ctx context.Context, o Options, opts transport.Options, ctl *http.Client) error {
 	backoff := time.Second
-	retry := func(err error) bool {
+	for s.engine() == nil {
+		eng, err := s.build(ctx, o, opts, ctl)
+		if err == nil {
+			s.mu.Lock()
+			s.eng = eng
+			s.mu.Unlock()
+			break
+		}
 		s.log.Warn("connect failed", "err", err, "retry_in", backoff)
 		s.setLink(ipc.StateFailed, err.Error())
 		s.note(diag.Event{Code: diag.CodeConnectFail, Detail: "retry"})
 		select {
 		case <-ctx.Done():
-			return false
+			return nil
 		case <-time.After(backoff):
 		}
 		backoff = min(backoff*2, 30*time.Second)
-		return true
 	}
-	for ctx.Err() == nil {
-		s.setLink(ipc.StateConnecting, s.lastError())
-		eng := s.engine()
-		if eng == nil {
-			var err error
-			if eng, err = s.build(ctx, o, opts, ctl, s.nudge); err != nil {
-				if !retry(err) {
-					return nil
-				}
-				continue
+	s.engine().Keep(ctx, client.Hooks{
+		OnConnecting: func() { s.setLink(ipc.StateConnecting, s.lastError()) },
+		OnFail: func(err error, retryIn time.Duration) {
+			s.log.Warn("connect failed", "err", err, "retry_in", retryIn)
+			s.setLink(ipc.StateFailed, err.Error())
+			s.note(diag.Event{Code: diag.CodeConnectFail, Detail: "retry"})
+		},
+		OnUp: func(info client.Info) {
+			s.resetExit()
+			s.setLink(ipc.StateConnected, "")
+			epid := client.EndpointID(info.Endpoint)
+			s.note(diag.Event{Code: diag.CodeConnectOK, EndpointID: epid})
+			s.log.Info("ready", "id", epid, "full", s.full)
+			// Probe the public address through the tunnel dial path. Skip when
+			// the session is proxy-only (unit tests and local-proxy mode): a
+			// hanging stream must not stall reconnect detection.
+			if s.full {
+				go s.probeExitIP(ctx)
+				return
 			}
-			s.mu.Lock()
-			s.eng = eng
-			s.mu.Unlock()
-		}
-		if err := eng.Connect(ctx); err != nil {
-			if ctx.Err() != nil || !retry(err) {
-				return nil
-			}
-			continue
-		}
-		backoff = time.Second
-		s.mu.Lock()
-		s.exitIP, s.exitProbeDone = "", false
-		s.mu.Unlock()
-		s.setLink(ipc.StateConnected, "")
-		info := eng.Info()
-		epid := client.EndpointID(info.Endpoint)
-		s.note(diag.Event{Code: diag.CodeConnectOK, EndpointID: epid})
-		s.log.Info("ready", "id", epid, "full", s.full)
-		// Probe the public address through the tunnel dial path. Skip when the
-		// session is proxy-only (unit tests and local-proxy mode): a hanging
-		// stream must not stall reconnect detection.
-		if s.full {
-			go s.probeExitIP(ctx)
-		} else {
 			s.mu.Lock()
 			s.exitProbeDone = true
 			s.mu.Unlock()
-		}
-		// ponytail: a session that dies without a dial noticing it has no
-		// event, so Alive is polled every 2s. Add an Alive channel to
-		// transport.Session if that latency matters.
-		tick := time.NewTicker(2 * time.Second)
-		for eng.Info().Connected {
-			select {
-			case <-ctx.Done():
-				tick.Stop()
-				return nil
-			case <-s.wake:
-			case <-tick.C:
-			}
-		}
-		tick.Stop()
-		s.mu.Lock()
-		s.exitIP, s.exitProbeDone = "", false
-		s.mu.Unlock()
-		s.setLink(ipc.StateSwitching, "")
-	}
+		},
+		OnDrop: func() {
+			s.resetExit()
+			s.setLink(ipc.StateSwitching, "")
+		},
+	})
 	return nil
+}
+
+func (s *Session) resetExit() {
+	s.mu.Lock()
+	s.exitIP, s.exitProbeDone = "", false
+	s.mu.Unlock()
 }
 
 // probeExitIP fetches the public address through the engine dial path.
@@ -455,13 +435,6 @@ func (s *Session) engine() *client.Engine {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.eng
-}
-
-func (s *Session) nudge(client.Info) {
-	select {
-	case s.wake <- struct{}{}:
-	default:
-	}
 }
 
 func (s *Session) setLink(l ipc.State, errText string) {
