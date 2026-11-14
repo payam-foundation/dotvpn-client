@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package app builds the client Engine from a Config. The CLI and the mobile
 // binding share it, so both speak the same carriers and follow the same rules.
 package app
@@ -38,9 +40,7 @@ type Params struct {
 	Opts transport.Options
 	// HTTP is the control-plane client; nil means the default.
 	HTTP *http.Client
-	// OnState is passed to the engine (see client.EngineConfig.OnState).
-	OnState func(client.Info)
-	Log     *slog.Logger
+	Log  *slog.Logger
 }
 
 // NewEngine builds the engine. With an account and control channels it also
@@ -51,7 +51,7 @@ func NewEngine(ctx context.Context, p Params) (*client.Engine, error) {
 	ecfg := client.EngineConfig{
 		Endpoints: eligibleEndpoints(c.Endpoints, c.UseRelays),
 		Dialers:   Dialers(p.Opts, c.UseRelays),
-		OnState:   p.OnState, Pin: c.Pin, Log: p.Log,
+		Pin:       c.Pin, Log: p.Log,
 	}
 	if c.UpstreamProxy != "" { // UDP carriers cannot ride a TCP proxy
 		delete(ecfg.Dialers, transport.KindH3)

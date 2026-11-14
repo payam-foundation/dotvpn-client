@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package main
 
 import (
@@ -6,13 +8,11 @@ import (
 	"errors"
 	"log/slog"
 	"os"
-	"os/exec"
 	"runtime"
 	"strings"
 	"time"
 
 	"github.com/payam-foundation/dotvpn-client/internal/ipc"
-	"github.com/payam-foundation/dotvpn-client/internal/service"
 )
 
 // Codes beyond ipc's own that only the app produces.
@@ -138,13 +138,6 @@ func (s *AppService) SetSettings(ctx context.Context, st ipc.Settings) error {
 	return toErr(s.d.ipc.SetSettings(ctx, st))
 }
 
-func (s *AppService) Unblock(ctx context.Context) error { return toErr(s.d.ipc.Unblock(ctx)) }
-
-func (s *AppService) ReportDiagnostics(ctx context.Context) (ipc.ReportResult, error) {
-	r, err := s.d.ipc.ReportDiagnostics(ctx)
-	return r, toErr(err)
-}
-
 func (s *AppService) Account(ctx context.Context) (ipc.Account, error) {
 	a, err := s.d.ipc.Account(ctx)
 	return a, toErr(err)
@@ -236,30 +229,3 @@ func (s *AppService) SetPrefs(p Prefs) error {
 // TakeInvite returns the outcome of a dv:// link the app was opened with
 // before the frontend was listening, once.
 func (s *AppService) TakeInvite() *InviteResult { return s.d.takeInvite() }
-
-// HelperLogPath is the helper session log location (file path or journal hint).
-func (s *AppService) HelperLogPath() string { return service.HelperLogPath() }
-
-// OpenHelperLog reveals or opens the helper log in the OS file manager / viewer.
-func (s *AppService) OpenHelperLog() error {
-	path := service.HelperLogPath()
-	if path == "" {
-		return &helperError{Code: ipc.CodeInternal, Message: "helper log path unknown on this OS"}
-	}
-	if strings.HasPrefix(path, "journalctl") {
-		return &helperError{Code: ipc.CodeInternal, Message: path}
-	}
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", "-R", path)
-	case "windows":
-		cmd = exec.Command("explorer.exe", "/select,", path)
-	default:
-		cmd = exec.Command("xdg-open", path)
-	}
-	if err := cmd.Start(); err != nil {
-		return &helperError{Code: ipc.CodeInternal, Message: err.Error()}
-	}
-	return nil
-}

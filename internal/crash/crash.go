@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package crash is the L2 opt-in crash reporter seam (Sentry).
 // Callers only use Reporter; DSN/Init/BeforeSend stay inside.
 package crash

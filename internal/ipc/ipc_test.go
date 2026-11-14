@@ -1,6 +1,9 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package ipc
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net"
@@ -90,8 +93,11 @@ func (f *fake) Logout() error {
 	f.set(Status{State: StateOff, Configured: false})
 	return nil
 }
-func (f *fake) ReportDiagnostics() (ReportResult, error) {
-	return ReportResult{IssueURL: "https://example.test/issues/1", Via: "browser"}, nil
+func (f *fake) BuildReport(p BuildReportParams) (ReportResult, error) {
+	if p.Preview {
+		return ReportResult{ID: "ABCD2345", Preview: p.Note}, nil
+	}
+	return ReportResult{ID: "ABCD2345", Blob: []byte{0, 1, 2, 255}}, nil
 }
 
 func start(t *testing.T) (*Client, *fake) {
@@ -168,6 +174,14 @@ func TestCalls(t *testing.T) {
 	}
 	if err := c.RemoveRelay(ctx, "abc"); err != nil {
 		t.Fatal(err)
+	}
+	r, err := c.BuildReport(ctx, BuildReportParams{WindowMin: 30})
+	if err != nil || r.ID != "ABCD2345" || !bytes.Equal(r.Blob, []byte{0, 1, 2, 255}) {
+		t.Fatalf("report = %+v %v", r, err)
+	}
+	r, err = c.BuildReport(ctx, BuildReportParams{Preview: true, Note: "hi"})
+	if err != nil || r.Preview != "hi" || r.Blob != nil {
+		t.Fatalf("preview = %+v %v", r, err)
 	}
 }
 
