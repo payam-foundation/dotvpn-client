@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package service installs the helper as an OS service: a LaunchDaemon on
 // macOS, a systemd unit on Linux, a Windows service. Install is the one step
 // that needs administrator rights; the GUI runs it once, elevated.
@@ -5,24 +7,8 @@ package service
 
 import (
 	"fmt"
-	"runtime"
 	"strings"
 )
-
-// HelperLogPath is where the helper process writes session logs (stderr on
-// macOS LaunchDaemon; journal on Linux; Windows event / service log elsewhere).
-func HelperLogPath() string {
-	switch runtime.GOOS {
-	case "darwin":
-		return "/var/log/dotvpn.log"
-	case "linux":
-		return "journalctl -u dotvpn"
-	case "windows":
-		return `C:\ProgramData\dotvpn\helper.log`
-	default:
-		return ""
-	}
-}
 
 // Name is the service identifier on every OS.
 const Name = "dotvpn"

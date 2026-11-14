@@ -21,6 +21,8 @@ export type Tab = "home" | "account" | "relay" | "settings";
 export type View = Tab | "invite";
 export type SettingsPage = "app" | "connection" | "dns" | "bypass";
 
+const connectionKeys = new Set<keyof Settings>(["fullTunnel", "killSwitch", "dns", "dnsPreset", "doh", "useRelays", "carriers", "directDomains", "directCidrs"]);
+
 const defaultPrefs: Prefs = { language: "", theme: "system", startAtLogin: false, startMinimized: true };
 
 /** Window state. Everything real lives in the helper; this only mirrors it. */
@@ -41,13 +43,24 @@ class App {
   view = $state<View>("home");
   settingsPage = $state<SettingsPage>("app");
   pickerOpen = $state(false);
+  /** Report-a-problem dialog in Settings. */
+  reportOpen = $state(false);
   /** Wall clock, ticking once a second so uptime moves. */
   now = $state(Date.now());
   /** A failed action, shown inline where it happened. */
   error = $state<AppError | null>(null);
   notice = $state("");
+  /** Connection settings changed while connected; they apply on the next connect. */
+  pendingApply = $state(false);
 
   #last: Counters | null = null;
+
+  /** Jump to the report dialog (from a connect failure). */
+  openReport(): void {
+    this.view = "settings";
+    this.settingsPage = "app";
+    this.reportOpen = true;
+  }
 
   get lang(): Lang {
     return this.prefs.language || "en";
@@ -178,6 +191,7 @@ class App {
       this.#last = cur;
       if (r) this.samples = push(this.samples, r);
     }
+    if (!s.running || s.state === "connecting") this.pendingApply = false;
     if (prev !== s.state) void api.servers().then((v) => (this.servers = v)).catch(() => {});
     if (s.state !== "failed" && prev === "failed") this.error = null;
   }
@@ -213,8 +227,9 @@ class App {
   async saveSettings(patch: Partial<Settings>): Promise<void> {
     const next = { ...this.settings, ...patch };
     if (next.killSwitch) next.fullTunnel = true;
+    const changed = (Object.keys(patch) as (keyof Settings)[]).some((k) => connectionKeys.has(k) && JSON.stringify(patch[k]) !== JSON.stringify(this.settings[k]));
     this.settings = next;
-    await this.run(() => api.setSettings(next));
+    if (await this.run(() => api.setSettings(next)) && changed && this.status.running) this.pendingApply = true;
   }
 
   async savePrefs(patch: Partial<Prefs>): Promise<void> {

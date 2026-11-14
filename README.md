@@ -8,7 +8,7 @@
 ![CI](https://github.com/payam-foundation/dotvpn-client/actions/workflows/ci.yml/badge.svg)
 ![Release](https://img.shields.io/github/v/release/payam-foundation/dotvpn-client?include_prereleases)
 ![Status: beta](https://img.shields.io/badge/status-beta-orange)
-![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue)
+![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)
 
 The client of [Dot VPN](https://github.com/payam-foundation/dotvpn-wire#related-repositories): a Go library and the `dotvpn` command for Linux, macOS and Windows. It runs a local SOCKS5/HTTP proxy or a full-device tunnel, and walks a fallback ladder of carriers until one works under the network you are on.
 
@@ -50,7 +50,7 @@ go install github.com/payam-foundation/dotvpn-client/cmd/dotvpn@vX.Y.Z
 
 ## Desktop app
 
-A tray app for macOS, Linux and Windows (`desktop/`, Wails + Svelte). It is unprivileged and talks to a helper service that holds the tunnel and kill switch, so quitting the app does not drop the tunnel and a GUI crash does not leak. Nav is **Home | Account | Relay | Settings**. Home uses a centered on/off switch (ink, never lime), node picker, kill switch, and via-relay / exit-IP when known. Account and Relay call `GET /v1/account` and `GET /v1/relays` through the helper; Settings covers App, Connection (protocols + bypass), DNS presets, Send diagnostics, and optional crash reports (off by default; Sentry `dv-desktop`).
+A tray app for macOS, Linux and Windows (`desktop/`, Wails + Svelte). It is unprivileged and talks to a helper service that holds the tunnel and kill switch, so quitting the app does not drop the tunnel and a GUI crash does not leak. Nav is **Home | Account | Relay | Settings**. Home uses a centered on/off switch (ink, never lime), node picker, kill switch, and via-relay / exit-IP when known. Account and Relay call `GET /v1/account` and `GET /v1/relays` through the helper; Settings covers App, Connection (protocols + bypass), DNS presets, Report a problem (an encrypted file to email), and optional crash reports (off by default; Sentry `dv-desktop`).
 
 1. Open the app and choose **Set up Dot VPN**. The helper is embedded in the app; this copies it to a root-owned system path and registers the service, with one OS admin prompt. Nothing else to download.
 2. Paste an invite from Account (or first-run), or click a `dv://` link.
@@ -62,7 +62,7 @@ The same helper is driven from a terminal:
 sudo dotvpn service install                   # once; also `uninstall` and `status`
 dotvpn import 'dv://...'
 dotvpn connect && dotvpn status
-dotvpn report                              # scrubbed diagnostics → control or GitHub draft
+dotvpn report --out FILE                   # encrypted report to email to report@dotvpn.org
 dotvpn disconnect
 ```
 
@@ -200,4 +200,4 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) first. Report vulnerabilities as describ
 
 ## License
 
-[PolyForm Noncommercial License 1.0.0](LICENSE). Source-available, not open source: personal, research, educational and non-profit use is permitted; commercial use needs a separate licence from Payam Foundation.
+[GNU AGPL-3.0-only](LICENSE). If you run a modified version as a network service you must offer its source to the users of that service.

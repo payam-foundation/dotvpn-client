@@ -1,10 +1,8 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package diag
 
 import (
-	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -25,41 +23,6 @@ func TestRingAndScrub(t *testing.T) {
 	}
 	if b.FailCounts["connect_fail:redacted"]+b.FailCounts["connect_fail:"+b.Events[0].Detail] == 0 && len(b.FailCounts) == 0 {
 		t.Fatalf("fail counts empty: %+v", b.FailCounts)
-	}
-}
-
-func TestSubmitControl(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/support/report" {
-			http.NotFound(w, r)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]string{"issue_url": "https://github.com/x/y/issues/1"})
-	}))
-	t.Cleanup(srv.Close)
-	c := &ClientSubmit{ControlURL: srv.URL, AccountKey: "k", HTTP: srv.Client()}
-	res, err := c.Submit(context.Background(), Bundle{Platform: "cli", AppVersion: "1"})
-	if err != nil || res.Via != "control" || res.IssueURL == "" {
-		t.Fatalf("res=%+v err=%v", res, err)
-	}
-}
-
-func TestSubmitBrowserFallback(t *testing.T) {
-	opened := ""
-	c := &ClientSubmit{
-		ControlURL: "http://127.0.0.1:1",
-		AccountKey: "k",
-		OpenURL:    func(u string) error { opened = u; return nil },
-	}
-	res, err := c.Submit(context.Background(), Bundle{Platform: "android", AppVersion: "1"})
-	if err != nil || res.Via != "browser" || opened == "" || !strings.Contains(opened, "dotvpn-android") {
-		t.Fatalf("res=%+v opened=%q err=%v", res, opened, err)
-	}
-	if strings.Contains(opened, "template=") || strings.Contains(opened, "body=") {
-		t.Fatalf("issue forms ignore body; want title-only URL: %q", opened)
-	}
-	if !strings.Contains(opened, "title=") {
-		t.Fatalf("missing title: %q", opened)
 	}
 }
 

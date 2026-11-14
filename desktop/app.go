@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package main
 
 import (
@@ -251,6 +253,7 @@ func (d *desktop) connectOrDisconnect() {
 }
 
 func run(startHidden bool, args []string) error {
+	sweepReports()
 	log := slog.Default()
 	d := &desktop{
 		ipc:   &ipc.Client{},

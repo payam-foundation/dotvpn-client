@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Command buildhelper builds the CGO-free dotvpn binary into desktop/helper,
 // where the app embeds it. Run through `go generate` in desktop/.
 //

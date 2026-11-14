@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 package daemon
 
 import (
@@ -37,7 +39,7 @@ func (f dialerFunc) Dial(context.Context, transport.Endpoint, transport.TokenSou
 // echo streams. The created session is sent on sessions.
 func fakeEngine(failures int, sessions chan *echoSession) engineFunc {
 	var n atomic.Int32
-	return func(_ context.Context, _ Options, _ transport.Options, _ *http.Client, onState func(client.Info)) (*client.Engine, error) {
+	return func(_ context.Context, _ Options, _ transport.Options, _ *http.Client) (*client.Engine, error) {
 		d := dialerFunc(func() (transport.Session, error) {
 			if int(n.Add(1)) <= failures {
 				return nil, errors.New("blocked")
@@ -53,7 +55,6 @@ func fakeEngine(failures int, sessions chan *echoSession) engineFunc {
 			Token:     func() string { return "t" },
 			Stagger:   time.Millisecond,
 			Cooldown:  time.Millisecond,
-			OnState:   onState,
 		}), nil
 	}
 }
