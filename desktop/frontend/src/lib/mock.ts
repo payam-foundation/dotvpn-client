@@ -144,9 +144,8 @@ export const mockApi: Api = {
   },
   settings: async () => structuredClone(settings),
   setSettings: async (s) => {
-    settings = structuredClone(s);
+    settings = JSON.parse(JSON.stringify(s));
   },
-  unblock: async () => {},
   buildReport: async (_w, _note, preview) => ({
     id: "K7MQ2XAB",
     address: "report@dotvpn.org",

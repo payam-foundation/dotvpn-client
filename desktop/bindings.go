@@ -138,8 +138,6 @@ func (s *AppService) SetSettings(ctx context.Context, st ipc.Settings) error {
 	return toErr(s.d.ipc.SetSettings(ctx, st))
 }
 
-func (s *AppService) Unblock(ctx context.Context) error { return toErr(s.d.ipc.Unblock(ctx)) }
-
 func (s *AppService) Account(ctx context.Context) (ipc.Account, error) {
 	a, err := s.d.ipc.Account(ctx)
 	return a, toErr(err)

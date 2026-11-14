@@ -29,10 +29,6 @@
     dns = app.settings.dns;
   });
 
-  async function unblock() {
-    if (await app.run(() => api.unblock())) flash = "settings.unblocked";
-  }
-
   let win = $state(60);
   let note = $state("");
   let preview = $state("");
@@ -223,8 +219,6 @@
     <div class="card actions">
       <button class="btn quiet block" onclick={() => (app.reportOpen = true)}>{t(lang, "report.title")}</button>
       <p class="caption muted">{t(lang, "report.hint")}</p>
-      <button class="btn quiet block" onclick={unblock} disabled={app.status.running}>{t(lang, "settings.unblock")}</button>
-      <p class="caption muted">{t(lang, "settings.unblockHint")}</p>
     </div>
   {:else if page === "connection"}
     <div class="card">
@@ -234,16 +228,15 @@
       <hr />
       <Toggle checked={s.useRelays} label={t(lang, "settings.useRelays")} hint={t(lang, "settings.useRelaysHint")} onchange={(v) => app.saveSettings({ useRelays: v })} />
     </div>
-    <div class="group">
-      <h2 class="caption muted">{t(lang, "settings.carriers")}</h2>
-      <p class="caption muted">{t(lang, "settings.carriersHint")}</p>
-      <div class="card chips">
+    <div class="card block">
+      <span class="small">{t(lang, "settings.carriers")}</span>
+      <span class="caption muted">{t(lang, "settings.carriersHint")}</span>
+      <div class="chips">
         {#each carriers as k}
-          <button class="chip" class:on={carrierOn(k)} onclick={() => toggleCarrier(k)}>{k}</button>
+          <button class="chip" class:on={carrierOn(k)} aria-pressed={carrierOn(k)} onclick={() => toggleCarrier(k)}>{k}</button>
         {/each}
       </div>
     </div>
-    <p class="caption muted">{t(lang, "settings.applyNext")}</p>
   {:else if page === "dns"}
     <div class="card">
       <label class="dns">
@@ -273,11 +266,10 @@
       <hr />
       <Toggle checked={s.doh} label={t(lang, "settings.doh")} hint={t(lang, "settings.dohHint")} onchange={(v) => app.saveSettings({ doh: v })} />
     </div>
-    <p class="caption muted">{t(lang, "settings.applyNext")}</p>
   {:else}
-    <div class="group">
-      <h2 class="caption muted">{t(lang, "routing.title")}</h2>
-      <p class="caption muted">{t(lang, "routing.body")}</p>
+    <div class="card block">
+      <span class="small">{t(lang, "routing.title")}</span>
+      <span class="caption muted">{t(lang, "routing.body")}</span>
       <label class="add">
         <span class="caption muted">{t(lang, "routing.add")}</span>
         <div class="row-input">
@@ -307,6 +299,8 @@
         </div>
       </label>
       {#if routeErr}<p class="small danger">{t(lang, routeErr)}</p>{/if}
+    </div>
+    <div class="group">
       {#if s.directDomains.length === 0 && s.directCidrs.length === 0}
         <p class="small muted">{t(lang, "routing.empty")}</p>
       {:else}
@@ -325,7 +319,6 @@
           {/each}
         </ul>
       {/if}
-      <p class="caption muted">{t(lang, "settings.applyNext")}</p>
     </div>
   {/if}
 </section>
@@ -346,17 +339,19 @@
   }
   .sub[aria-selected="true"] { color: var(--dot-fg); border-color: var(--dot-fg); background: color-mix(in srgb, var(--dot-fg) 4%, transparent); }
   hr { margin: 0; border: 0; border-top: 1px solid var(--dot-border); }
-  .dns, .pick, .add { display: flex; flex-direction: column; gap: var(--dot-space-2); padding: var(--dot-space-3) var(--dot-space-4); }
-  .report { display: flex; flex-direction: column; gap: var(--dot-space-3); padding: var(--dot-space-4); }
-  .preview { max-height: 200px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; margin: 0; }
-  .actions { padding: var(--dot-space-4); }
-  .group { display: flex; flex-direction: column; gap: var(--dot-space-2); }
-  .chips { display: flex; flex-wrap: wrap; gap: var(--dot-space-2); padding: var(--dot-space-3) var(--dot-space-4); }
+  .dns, .pick { display: flex; flex-direction: column; gap: var(--dot-space-2); padding: var(--dot-space-3) var(--dot-space-4); }
+  .block { display: flex; flex-direction: column; gap: var(--dot-space-1); padding: var(--dot-space-3) var(--dot-space-4); }
+  .add { display: flex; flex-direction: column; gap: var(--dot-space-2); margin-top: var(--dot-space-2); }
+  .chips { display: flex; flex-wrap: wrap; gap: var(--dot-space-2); margin-top: var(--dot-space-2); }
   .chip {
     padding: 4px 10px; border: 1px solid var(--dot-border); border-radius: var(--dot-radius-pill);
     background: none; color: var(--dot-fg-muted); font: inherit; font-family: var(--dot-font-mono); font-size: 12px;
   }
   .chip.on { color: var(--dot-fg); border-color: var(--dot-fg); }
+  .report { display: flex; flex-direction: column; gap: var(--dot-space-3); padding: var(--dot-space-4); }
+  .preview { max-height: 200px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; margin: 0; }
+  .actions { padding: var(--dot-space-4); }
+  .group { display: flex; flex-direction: column; gap: var(--dot-space-2); }
   .select {
     appearance: none;
     background-image: linear-gradient(45deg, transparent 50%, var(--dot-fg-muted) 50%), linear-gradient(135deg, var(--dot-fg-muted) 50%, transparent 50%);
