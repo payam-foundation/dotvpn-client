@@ -50,7 +50,7 @@ func TestNetworkChangedReconnectsWithoutCooling(t *testing.T) {
 		dials.Add(1)
 		return newLive(), nil
 	})
-	defer e.Close()
+	defer func() { _ = e.Close() }()
 	ctx, cancel := context.WithCancel(context.Background())
 	up := make(chan struct{}, 4)
 	done := make(chan struct{})
@@ -98,7 +98,7 @@ func TestNetworkChangedDebounces(t *testing.T) {
 	e := newKeepEngine(func(context.Context, transport.Endpoint) (transport.Session, error) {
 		return newLive(), nil
 	})
-	defer e.Close()
+	defer func() { _ = e.Close() }()
 	for range 5 {
 		e.NetworkChanged()
 		time.Sleep(50 * time.Millisecond)
@@ -114,7 +114,7 @@ func TestKeepBackoffResetsOnRoam(t *testing.T) {
 	e := newKeepEngine(func(context.Context, transport.Endpoint) (transport.Session, error) {
 		return nil, errors.New("blocked")
 	})
-	defer e.Close()
+	defer func() { _ = e.Close() }()
 	ctx, cancel := context.WithCancel(context.Background())
 	retry := make(chan time.Duration, 8)
 	done := make(chan struct{})
@@ -151,7 +151,7 @@ func TestRoamDuringConnectIsNotAFault(t *testing.T) {
 		}
 		return newLive(), nil
 	})
-	defer e.Close()
+	defer func() { _ = e.Close() }()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	up := make(chan struct{}, 1)
