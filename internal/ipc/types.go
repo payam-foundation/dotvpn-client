@@ -144,6 +144,8 @@ type Settings struct {
 	DNSPreset string `json:"dnsPreset,omitempty"`
 	// DoH uses DNS-over-HTTPS for bypass/ECH lookups when the preset supports it.
 	DoH bool `json:"doh"`
+	// Shaping pads relay records to fixed size buckets (traffic analysis cover).
+	Shaping bool `json:"shaping"`
 	// SystemDNS is the host resolver Dot VPN sees when the preset is system
 	// (first nameserver from resolv.conf / platform equivalent). Read-only.
 	SystemDNS string `json:"systemDns,omitempty"`

@@ -21,15 +21,15 @@ func TestRelayTransportPolicy(t *testing.T) {
 	if got := eligibleEndpoints([]transport.Endpoint{direct, relay, dns}, true); len(got) != 3 {
 		t.Fatalf("relays enabled endpoints = %+v", got)
 	}
-	if got := Dialers(transport.Options{}, false); got[reverse.KindReverse] != nil || got[reverse.KindDNS] != nil {
+	if got := Dialers(transport.Options{}, false, true); got[reverse.KindReverse] != nil || got[reverse.KindDNS] != nil {
 		t.Fatalf("relays disabled dialers = %+v", got)
 	}
-	if got := Dialers(transport.Options{}, true); got[reverse.KindReverse] == nil || got[reverse.KindDNS] == nil {
+	if got := Dialers(transport.Options{}, true, true); got[reverse.KindReverse] == nil || got[reverse.KindDNS] == nil {
 		t.Fatalf("relays enabled dialers = %+v", got)
 	}
 
 	eps := []transport.Endpoint{relay}
-	channelHTTP := relayChannelHTTP(func() []transport.Endpoint { return eps }, transport.Options{}, func() string { return "token" })
+	channelHTTP := relayChannelHTTP(func() []transport.Endpoint { return eps }, transport.Options{}, true, func() string { return "token" })
 	if got := channelHTTP(discovery.ControlChannel{}); got != nil {
 		t.Fatal("channel without relay must use the default HTTP client")
 	}

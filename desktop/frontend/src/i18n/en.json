@@ -140,6 +140,8 @@
   "settings.systemDns": "System DNS",
   "settings.systemDnsHint": "The resolver your device is using right now.",
   "settings.systemDnsUnknown": "Not detected",
+  "settings.shaping": "Hide traffic sizes",
+  "settings.shapingHint": "Pads relay traffic to fixed sizes. Uses more data.",
   "settings.doh": "DNS over HTTPS",
   "settings.dohHint": "For bypass and ECH lookups only.",
   "settings.carriers": "Protocols",

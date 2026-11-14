@@ -227,6 +227,8 @@
       <Toggle checked={s.killSwitch} label={t(lang, "settings.killSwitch")} hint={t(lang, "settings.killSwitchHint")} onchange={(v) => app.saveSettings({ killSwitch: v })} />
       <hr />
       <Toggle checked={s.useRelays} label={t(lang, "settings.useRelays")} hint={t(lang, "settings.useRelaysHint")} onchange={(v) => app.saveSettings({ useRelays: v })} />
+      <hr />
+      <Toggle checked={s.shaping} label={t(lang, "settings.shaping")} hint={t(lang, "settings.shapingHint")} disabled={!s.useRelays} onchange={(v) => app.saveSettings({ shaping: v })} />
     </div>
     <div class="card block">
       <span class="small">{t(lang, "settings.carriers")}</span>

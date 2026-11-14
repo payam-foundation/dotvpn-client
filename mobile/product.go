@@ -29,7 +29,7 @@ func selectableCarriers(s []string) []string {
 }
 
 // Settings returns the Android settings JSON (useRelays, carriers, relays,
-// pin, dns, dnsPreset, doh, directDomains, directCidrs).
+// pin, dns, dnsPreset, doh, shaping, directDomains, directCidrs).
 func Settings(cfgYAML string) (string, error) {
 	c, err := config.Parse([]byte(cfgYAML))
 	if err != nil {
@@ -47,6 +47,7 @@ func Settings(cfgYAML string) (string, error) {
 		"dns":           c.Tun.DNS,
 		"dnsPreset":     preset,
 		"doh":           c.Tun.DoH,
+		"shaping":       c.Tun.ShapingOn(),
 		"directDomains": nonNil(c.Routing.DirectDomains),
 		"directCidrs":   nonNil(c.Routing.DirectCIDRs),
 	})
@@ -68,6 +69,7 @@ func ApplySettings(cfgYAML, patchJSON string) (string, error) {
 		DNSPreset     *string  `json:"dnsPreset"`
 		DNS           *string  `json:"dns"`
 		DoH           *bool    `json:"doh"`
+		Shaping       *bool    `json:"shaping"`
 		DirectDomains []string `json:"directDomains"`
 		DirectCIDRs   []string `json:"directCidrs"`
 	}
@@ -85,6 +87,9 @@ func ApplySettings(cfgYAML, patchJSON string) (string, error) {
 	}
 	if p.DoH != nil {
 		c.Tun.DoH = *p.DoH
+	}
+	if p.Shaping != nil {
+		c.Tun.Shaping = p.Shaping
 	}
 	if p.DNSPreset != nil {
 		c.Tun.DNSPreset = *p.DNSPreset
