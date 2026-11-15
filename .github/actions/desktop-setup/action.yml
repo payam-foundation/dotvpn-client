@@ -1,0 +1,40 @@
+name: desktop-setup
+description: Toolchain and built frontend for the Wails desktop app (run after checkout).
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version-file: go.mod
+    - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      with:
+        version: 10
+        package_json_file: desktop/frontend/package.json
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: 24
+        cache: pnpm
+        cache-dependency-path: desktop/frontend/pnpm-lock.yaml
+    - name: webkit headers
+      if: runner.os == 'Linux'
+      shell: bash
+      # Wails v3 on Linux needs GTK 4 + WebKitGTK 6 (not the GTK 3 / 4.1 stack).
+      run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
+    - name: frontend
+      shell: bash
+      working-directory: desktop/frontend
+      run: |
+        pnpm install --frozen-lockfile
+        pnpm build
+    - name: version
+      shell: bash
+      # Tag vX.Y.Z -> X.Y.Z; manual runs get a placeholder.
+      run: |
+        if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF_NAME#v}"; else v="0.0.0-dev"; fi
+        echo "VERSION=$v" >> "$GITHUB_ENV"
+        echo "VERSION_NUM=${v%%-*}" >> "$GITHUB_ENV"
+    - name: wails3 cli
+      shell: bash
+      # Pinned to the version in desktop/go.mod; used only for lipo, dmg, deb and syso.
+      run: GOWORK=off go install github.com/wailsapp/wails/v3/cmd/wails3@v3.1.0
