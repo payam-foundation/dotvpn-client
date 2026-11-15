@@ -18,27 +18,79 @@ Beta. The kill switch has unit tests on every OS and an end-to-end test on Linux
 
 ## How it connects
 
-Carriers race with a short stagger (happy eyeballs). The last winner goes first on the next start. A new session only counts as connected after a probe request succeeds through it. With the kill switch on, the device stays closed to everything outside the tunnel while the ladder is still searching or has failed.
+Config comes from a `dv://` invite (or saved YAML). With a control URL the engine refreshes a signed server list and short-lived tokens; otherwise it uses static endpoints. Carriers race in **two tiers** (happy eyeballs within each tier). The last winner is preferred on the next start via `state.json`. A session only counts as connected after a probe (`GET /generate_204` to `probe_target`, default `connectivitycheck.gstatic.com:80`) succeeds through it. With the kill switch on, the device stays closed while the ladder searches or has failed. Carrier kinds are defined in [dotvpn-wire](https://github.com/payam-foundation/dotvpn-wire#carriers). [dotvpn-android](https://github.com/payam-foundation/dotvpn-android) binds the same engine through this repo's `mobile/` package.
 
 ```mermaid
 flowchart TD
     start(["Invite or config"])
-    race["Race next carriers, staggered<br/>h3 → h2 → cdnws → webtunnel → snowflake → reverse relay"]
-    probe{"Probe request through<br/>the session succeeds?"}
+    disc["Discovery / token refresh<br/>or static endpoints"]
+    direct["Tier 1: direct<br/>h2 h3 cdnws webtunnel snowflake<br/>300ms stagger, 2.5s budget"]
+    relay["Tier 2: reverse + dns relays<br/>750ms stagger, max 2 concurrent"]
+    probe{"Probe /generate_204<br/>through session?"}
     ok(["Connected"])
-    ks["Kill switch stays closed<br/>retry in background"]
+    ks["Kill switch closed<br/>retry in background"]
 
-    start -->|"last winner first"| race
-    race -->|"session up"| probe
-    probe -->|"yes"| ok
-    probe -->|"no, blocked or slow"| race
-    race -->|"ladder exhausted"| ks
+    start --> disc
+    disc -->|"last winner first"| direct
+    direct -->|"session up"| probe
+    direct -->|"fail or budget"| relay
+    relay -->|"session up"| probe
+    probe -->|yes| ok
+    probe -->|"no"| direct
+    relay -->|"ladder exhausted"| ks
 
     classDef focal fill:#fdf0ea,stroke:#eb6c36,color:#2d3142
     class probe focal
 ```
 
-The order is a default. The server list and your config decide which endpoints exist, and the engine reorders them by recent success.
+Which endpoints exist comes from the invite and control's signed list (`ExpandReverse` for hidden nodes). `use_relays` gates reverse/dns; opted-in relay ids in `relays` are sent on discovery/token refresh.
+
+### Invites and control APIs
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Client as client / helper
+    participant Ctrl as control
+
+    User->>Client: dv:// account invite
+    Client->>Client: invite.Decode → config.Apply
+    Client->>Ctrl: GET /v1/account (Bearer account key)
+    alt control unreachable
+        Client-->>User: NeedsRelay true
+        User->>Client: dvr:// or relay id
+        Client->>Client: MergeRelayInvite
+    end
+    Client->>Ctrl: discovery / token refresh
+    Client->>Ctrl: GET /v1/relays?ids=…
+    Client->>Ctrl: GET /v1/ads?slot=&relay_id= optional
+    Note over Client: then tiered race to node or relay
+```
+
+- **`dv://`:** account, control URL, trusted keys, endpoints, optional bootstrap. Tunnel enabled after import.
+- **`dvr://`:** control-signed relay invite; merges expanded relay endpoints so a blocked-path client can cold-start. Verify before dialing ([wire invites](https://github.com/payam-foundation/dotvpn-wire#tokens-and-invites)).
+- **401 on account:** logout clears account/control/endpoints/relays; carrier and routing prefs stay.
+
+### Desktop helper
+
+The tray GUI is unprivileged. A root-owned helper holds the tunnel and kill switch over IPC, so quitting the window does not drop the session and a GUI crash does not leak. The same helper is driven by `dotvpn import` / `connect` / `status`.
+
+```mermaid
+flowchart LR
+    gui["Tray GUI<br/>Wails + Svelte"]
+    helper["Helper service<br/>tunnel, kill switch, IPC"]
+    engine["Go engine<br/>race, gVisor / proxy"]
+    edge(["Node or relay"])
+
+    gui -->|"IPC"| helper
+    helper --> engine
+    engine -->|"protected sockets"| edge
+
+    classDef focal fill:#fdf0ea,stroke:#eb6c36,color:#2d3142
+    classDef ext fill:#f5f5f5,stroke:#7a8399,stroke-dasharray:4 3,color:#2d3142
+    class helper focal
+    class edge ext
+```
 
 ## Install
 
