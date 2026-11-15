@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/payam-foundation/dotvpn-client/compare/v0.5.0...v0.6.0) (2026-11-15)
+
+
+### Features
+
+* **client:** Settings toggle for relay size shaping ([#36](https://github.com/payam-foundation/dotvpn-client/issues/36)) ([75bfff6](https://github.com/payam-foundation/dotvpn-client/commit/75bfff6704646664609f91e7633395eedc662b68))
+
 ## [0.5.0](https://github.com/payam-foundation/dotvpn-client/compare/v0.4.0...v0.5.0) (2026-11-14)
 
 
