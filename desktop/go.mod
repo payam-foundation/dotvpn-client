@@ -3,7 +3,7 @@ module github.com/payam-foundation/dotvpn-client/desktop
 go 1.27.4
 
 require (
-	github.com/godbus/dbus/v5 v5.2.2
+	github.com/godbus/dbus/v5 v5.2.4
 	github.com/payam-foundation/dotvpn-client v0.0.0
 	github.com/payam-foundation/log-decypher v0.1.0
 	github.com/wailsapp/wails/v3 v3.1.0
