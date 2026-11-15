@@ -5,6 +5,7 @@ on:
     branches: [main]
     tags: ["v*"]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -108,13 +109,13 @@ jobs:
       run:
         working-directory: desktop
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v4
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           version: 10
           package_json_file: desktop/frontend/package.json
@@ -152,6 +153,308 @@ jobs:
           go vet ./...
           go test -race -count=1 ./...
           go build -trimpath -o ${{ runner.temp }}/dotvpn-desktop${{ runner.os == 'Windows' && '.exe' || '' }} .
+
+  # Desktop installers. Run on tags and manual dispatch, not on every PR. Each
+  # job signs only when its secrets exist; otherwise it ships ad-hoc/unsigned
+  # builds under the same artifact names (see "Shared pattern": the secrets
+  # context is not allowed in step ifs, so a detect step publishes signed=true|false).
+  desktop-macos:
+    needs: [test, security, cross, desktop]
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    timeout-minutes: 60
+    outputs:
+      signed: ${{ steps.detect.outputs.signed }}
+    env:
+      APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+      APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/desktop-setup
+      - name: detect signing
+        id: detect
+        run: |
+          if [ -n "$APPLE_CERT_P12_BASE64" ] && [ -n "$APPLE_CERT_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ] \
+            && [ -n "$APPLE_API_KEY_P8" ] && [ -n "$APPLE_API_KEY_ID" ] && [ -n "$APPLE_API_ISSUER" ]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Apple secrets not set: building an ad-hoc signed, not notarized app (Gatekeeper will warn)."
+          fi
+      - name: build universal app
+        working-directory: desktop
+        run: |
+          set -euo pipefail
+          for arch in arm64 amd64; do
+            # The embedded helper must match the app's architecture.
+            (cd .. && CGO_ENABLED=0 GOARCH=$arch go build -trimpath -o desktop/helper/dotvpn ./cmd/dotvpn)
+            CGO_ENABLED=1 GOARCH=$arch go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$RUNNER_TEMP/dotvpn-desktop-$arch" .
+          done
+          app="$RUNNER_TEMP/dist/Dot VPN.app"
+          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+          "$HOME/go/bin/wails3" tool lipo -input "$RUNNER_TEMP/dotvpn-desktop-arm64" -input "$RUNNER_TEMP/dotvpn-desktop-amd64" -output "$app/Contents/MacOS/dotvpn-desktop"
+          chmod +x "$app/Contents/MacOS/dotvpn-desktop"
+          sed "s|<string>0.1.0</string>|<string>$VERSION_NUM</string>|" build/darwin/Info.plist > "$app/Contents/Info.plist"
+          cp build/darwin/icons.icns "$app/Contents/Resources/icons.icns"
+      - name: import certificate
+        if: steps.detect.outputs.signed == 'true'
+        uses: apple-actions/import-codesign-certs@288b8ec97b82c66b6f2a6baaf7acc8dfbcbe331c # v7.2.0
+        with:
+          p12-file-base64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          p12-password: ${{ secrets.APPLE_CERT_PASSWORD }}
+      - name: ad-hoc sign
+        if: steps.detect.outputs.signed != 'true'
+        run: codesign --force --deep -s - "$RUNNER_TEMP/dist/Dot VPN.app"
+      - name: sign and notarize app
+        if: steps.detect.outputs.signed == 'true'
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/dist"
+          id=$(security find-identity -v -p codesigning | grep "Developer ID Application" | grep "($APPLE_TEAM_ID)" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          test -n "$id" || { echo "no Developer ID Application identity for team $APPLE_TEAM_ID"; exit 1; }
+          echo "IDENTITY=$id" >> "$GITHUB_ENV"
+          codesign --force --deep --options runtime --timestamp -s "$id" "Dot VPN.app"
+          codesign --verify --deep --strict --verbose=2 "Dot VPN.app"
+          echo "$APPLE_API_KEY_P8" > "$RUNNER_TEMP/notary.p8"
+          trap 'rm -f "$RUNNER_TEMP/notary.p8"' EXIT
+          ditto -c -k --keepParent "Dot VPN.app" notarize.zip
+          xcrun notarytool submit notarize.zip --key "$RUNNER_TEMP/notary.p8" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" --wait
+          xcrun stapler staple "Dot VPN.app"
+          rm notarize.zip
+      - name: package
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/dist"
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          ditto -c -k --keepParent "Dot VPN.app" "$GITHUB_WORKSPACE/out/dotvpn-desktop_macos_universal.zip"
+          "$HOME/go/bin/wails3" tool package -format dmg -name "Dot VPN" -out "$PWD" \
+            -background "$GITHUB_WORKSPACE/desktop/build/darwin/dmg-background.png" \
+            -file-icon "$GITHUB_WORKSPACE/desktop/build/darwin/dmg-file-icon.png"
+          mv "Dot VPN.dmg" "$GITHUB_WORKSPACE/out/dotvpn-desktop_macos_universal.dmg"
+      - name: sign and notarize dmg
+        if: steps.detect.outputs.signed == 'true'
+        run: |
+          set -euo pipefail
+          dmg="$GITHUB_WORKSPACE/out/dotvpn-desktop_macos_universal.dmg"
+          codesign --force --timestamp -s "$IDENTITY" "$dmg"
+          echo "$APPLE_API_KEY_P8" > "$RUNNER_TEMP/notary.p8"
+          trap 'rm -f "$RUNNER_TEMP/notary.p8"' EXIT
+          xcrun notarytool submit "$dmg" --key "$RUNNER_TEMP/notary.p8" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" --wait
+          xcrun stapler staple "$dmg"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-macos
+          path: out/*
+          if-no-files-found: error
+
+  desktop-windows:
+    needs: [test, security, cross, desktop]
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write # Azure OIDC login (only used when signing)
+    outputs:
+      signed: ${{ steps.detect.outputs.signed }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+      AZURE_SIGNING_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+      AZURE_SIGNING_PROFILE: ${{ secrets.AZURE_SIGNING_PROFILE }}
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/desktop-setup
+      - name: detect signing
+        id: detect
+        run: |
+          if [ -n "$AZURE_CLIENT_ID" ] && [ -n "$AZURE_TENANT_ID" ] && [ -n "$AZURE_SUBSCRIPTION_ID" ] \
+            && [ -n "$AZURE_SIGNING_ENDPOINT" ] && [ -n "$AZURE_SIGNING_ACCOUNT" ] && [ -n "$AZURE_SIGNING_PROFILE" ]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Azure signing secrets not set: building unsigned (SmartScreen will warn)."
+          fi
+      - name: build
+        working-directory: desktop
+        run: |
+          set -euo pipefail
+          go generate ./...
+          sed "s/0\.1\.0/$VERSION_NUM/g" build/windows/info.json > "$RUNNER_TEMP/info.json"
+          "$HOME/go/bin/wails3" generate syso -arch amd64 -icon build/windows/icon.ico \
+            -manifest build/windows/wails.exe.manifest -info "$RUNNER_TEMP/info.json" -out wails_windows_amd64.syso
+          mkdir -p "$RUNNER_TEMP/exe"
+          CGO_ENABLED=1 go build -trimpath -ldflags "-s -w -H windowsgui -X main.version=$VERSION" -o "$RUNNER_TEMP/exe/Dot VPN.exe" .
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        if: steps.detect.outputs.signed == 'true'
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: sign app exe
+        if: steps.detect.outputs.signed == 'true'
+        uses: Azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          endpoint: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_SIGNING_PROFILE }}
+          files-folder: ${{ runner.temp }}\exe
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+      - name: installer
+        working-directory: desktop/build/windows/nsis
+        run: |
+          set -euo pipefail
+          if ! command -v makensis >/dev/null && [ ! -x "/c/Program Files (x86)/NSIS/makensis.exe" ]; then
+            choco install nsis -y --no-progress
+          fi
+          export PATH="$PATH:/c/Program Files (x86)/NSIS"
+          exe=$(cygpath -w "$RUNNER_TEMP/exe/Dot VPN.exe")
+          MSYS2_ARG_CONV_EXCL='*' makensis "-DARG_WAILS_AMD64_BINARY=$exe" "-DINFO_PRODUCTVERSION=$VERSION_NUM" project.nsi
+          mkdir -p "$RUNNER_TEMP/installer" "$GITHUB_WORKSPACE/out"
+          mv ../../../bin/*-installer.exe "$RUNNER_TEMP/installer/dotvpn-desktop_windows_amd64_installer.exe"
+      - name: sign installer
+        if: steps.detect.outputs.signed == 'true'
+        uses: Azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          endpoint: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_SIGNING_PROFILE }}
+          files-folder: ${{ runner.temp }}\installer
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+      - name: package
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          cp "$RUNNER_TEMP/installer/dotvpn-desktop_windows_amd64_installer.exe" out/
+          cd "$RUNNER_TEMP/exe"
+          7z a -tzip "$GITHUB_WORKSPACE/out/dotvpn-desktop_windows_amd64.zip" "Dot VPN.exe"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-windows
+          path: out/*
+          if-no-files-found: error
+
+  desktop-linux:
+    needs: [test, security, cross, desktop]
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    env:
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/desktop-setup
+      - name: build
+        working-directory: desktop
+        run: |
+          set -euo pipefail
+          go generate ./...
+          mkdir -p bin
+          go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o bin/dotvpn-desktop .
+      - name: package
+        working-directory: desktop
+        env:
+          GOARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          out="$GITHUB_WORKSPACE/out"
+          mkdir -p "$out"
+          VERSION="$VERSION_NUM" "$HOME/go/bin/wails3" tool package -format deb -name dotvpn-desktop -config build/linux/nfpm/nfpm.yaml -out "$out"
+          mv "$out/dotvpn-desktop.deb" "$out/dotvpn-desktop_linux_${{ matrix.arch }}.deb"
+          stage=$(mktemp -d)/dotvpn-desktop
+          mkdir -p "$stage"
+          cp bin/dotvpn-desktop build/linux/dotvpn-desktop.desktop build/appicon.png "$stage/"
+          tar -C "$(dirname "$stage")" -czf "$out/dotvpn-desktop_linux_${{ matrix.arch }}.tar.gz" dotvpn-desktop
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-linux-${{ matrix.arch }}
+          path: out/*
+          if-no-files-found: error
+
+  desktop-release:
+    needs: [desktop-macos, desktop-windows, desktop-linux]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      id-token: write # keyless cosign signature + provenance
+      attestations: write
+    env:
+      GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: desktop-*
+          path: dist
+          merge-multiple: true
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+      - name: checksums and signatures
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          sha256sum * > desktop-checksums.txt
+          cosign sign-blob --yes --bundle desktop-checksums.txt.sigstore.json desktop-checksums.txt
+          if [ -n "$GPG_PRIVATE_KEY" ]; then
+            echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+            gpg --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" --armor --detach-sign desktop-checksums.txt
+          fi
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*
+      - name: upload and note signing status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MAC: ${{ needs.desktop-macos.outputs.signed == 'true' && 'Developer ID signed and notarized' || 'ad-hoc signed, not notarized (right-click Open on first launch)' }}
+          WIN: ${{ needs.desktop-windows.outputs.signed == 'true' && 'Authenticode signed' || 'unsigned (SmartScreen will warn)' }}
+        run: |
+          set -euo pipefail
+          # release-please already created the release; attach the desktop artifacts.
+          gh release upload "$GITHUB_REF_NAME" dist/* --clobber -R "$GITHUB_REPOSITORY"
+          body=$(gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --json body --jq .body)
+          marker="<!-- desktop-signing -->"
+          case "$body" in *"$marker"*) exit 0 ;; esac
+          {
+            printf '%s\n\n%s\n' "$body" "$marker"
+            echo "### Desktop signing status"
+            echo "- macOS: $MAC"
+            echo "- Windows: $WIN"
+            echo "- Linux: checksums signed with cosign; GPG signature attached when configured"
+          } > notes.md
+          gh release edit "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --notes-file notes.md
+          cat notes.md >> "$GITHUB_STEP_SUMMARY"
 
   release:
     needs: [test, security, cross, desktop]

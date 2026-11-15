@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=Dot VPN
+Comment=Dot VPN desktop client
+# The Exec line includes %u to pass the URL to the application
+Exec=/usr/local/bin/dotvpn-desktop %u
+Terminal=false
+Type=Application
+Icon=dotvpn-desktop
+Categories=Utility;
+StartupWMClass=dotvpn-desktop
+
+ 
