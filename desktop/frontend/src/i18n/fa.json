@@ -140,6 +140,8 @@
   "settings.systemDns": "DNS سیستم",
   "settings.systemDnsHint": "حل‌کننده‌ای که دستگاه شما همین حالا استفاده می‌کند.",
   "settings.systemDnsUnknown": "شناسایی نشد",
+  "settings.shaping": "پنهان‌سازی اندازه ترافیک",
+  "settings.shapingHint": "ترافیک رله را به اندازه‌های ثابت پر می‌کند. داده بیشتری مصرف می‌شود.",
   "settings.doh": "DNS روی HTTPS",
   "settings.dohHint": "فقط برای عبور و جستجوی ECH.",
   "settings.carriers": "پروتکل‌ها",

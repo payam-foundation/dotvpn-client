@@ -17,6 +17,7 @@ let settings: Settings = {
   dns: "1.1.1.1:53",
   dnsPreset: "cloudflare",
   doh: false,
+  shaping: true,
   systemDns: "192.168.1.1",
   useRelays: q.has("viarelay"),
   carriers: [],

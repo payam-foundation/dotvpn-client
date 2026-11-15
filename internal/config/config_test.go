@@ -117,3 +117,13 @@ func TestCheckListen(t *testing.T) {
 		})
 	}
 }
+
+func TestShapingDefaultsOn(t *testing.T) {
+	off := false
+	if !(TunConfig{}).ShapingOn() {
+		t.Fatal("omitted shaping must default on")
+	}
+	if (TunConfig{Shaping: &off}).ShapingOn() {
+		t.Fatal("shaping:false must be off")
+	}
+}

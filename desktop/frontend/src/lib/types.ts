@@ -83,6 +83,8 @@ export interface Settings {
   dns: string;
   dnsPreset?: string;
   doh: boolean;
+  /** Pad relay records to fixed size buckets. */
+  shaping: boolean;
   /** Host resolver Dot VPN sees when preset is system (read-only). */
   systemDns?: string;
   pin?: string;
@@ -144,6 +146,7 @@ export const emptySettings: Settings = {
   dns: "",
   dnsPreset: "cloudflare",
   doh: false,
+  shaping: true,
   useRelays: false,
   carriers: [],
   directDomains: [],

@@ -50,7 +50,7 @@ func NewEngine(ctx context.Context, p Params) (*client.Engine, error) {
 	p.Opts.Fragment, p.Opts.Upstream = c.Fragment, c.UpstreamProxy
 	ecfg := client.EngineConfig{
 		Endpoints: eligibleEndpoints(c.Endpoints, c.UseRelays),
-		Dialers:   Dialers(p.Opts, c.UseRelays),
+		Dialers:   Dialers(p.Opts, c.UseRelays, c.Tun.ShapingOn()),
 		Pin:       c.Pin, Log: p.Log,
 	}
 	if c.UpstreamProxy != "" { // UDP carriers cannot ride a TCP proxy
@@ -102,7 +102,7 @@ func NewEngine(ctx context.Context, p Params) (*client.Engine, error) {
 			live.merge(eps)
 		}
 		if c.UseRelays {
-			source.ChannelHTTP = relayChannelHTTP(live.get, p.Opts, func() string {
+			source.ChannelHTTP = relayChannelHTTP(live.get, p.Opts, c.Tun.ShapingOn(), func() string {
 				if token := tm.Token(); token != "" {
 					return token
 				}
@@ -145,7 +145,7 @@ func NewEngine(ctx context.Context, p Params) (*client.Engine, error) {
 
 // Dialers returns the enabled carrier implementations. The ladder order comes
 // from the endpoint list, not from here.
-func Dialers(o transport.Options, useRelays bool) map[transport.Kind]transport.Dialer {
+func Dialers(o transport.Options, useRelays, shaping bool) map[transport.Kind]transport.Dialer {
 	out := map[transport.Kind]transport.Dialer{
 		transport.KindH2:        h2connect.Dialer{Opts: o},
 		transport.KindH3:        h3connect.Dialer{Opts: o},
@@ -154,8 +154,8 @@ func Dialers(o transport.Options, useRelays bool) map[transport.Kind]transport.D
 		transport.KindSnowflake: snowflake.Dialer{Opts: o},
 	}
 	if useRelays {
-		out[reverse.KindReverse] = reverse.Dialer{Opts: o}
-		out[reverse.KindDNS] = reverse.Dialer{Opts: o}
+		out[reverse.KindReverse] = reverse.Dialer{Opts: o, NoShaping: !shaping}
+		out[reverse.KindDNS] = reverse.Dialer{Opts: o, NoShaping: !shaping}
 	}
 	return out
 }
@@ -202,7 +202,7 @@ func (l *liveEndpoints) merge(eps []transport.Endpoint) {
 	}
 }
 
-func relayChannelHTTP(endpoints func() []transport.Endpoint, opts transport.Options, token transport.TokenSource) func(discovery.ControlChannel) *http.Client {
+func relayChannelHTTP(endpoints func() []transport.Endpoint, opts transport.Options, shaping bool, token transport.TokenSource) func(discovery.ControlChannel) *http.Client {
 	return func(ch discovery.ControlChannel) *http.Client {
 		if ch.Relay == "" {
 			return nil
@@ -219,7 +219,7 @@ func relayChannelHTTP(endpoints func() []transport.Endpoint, opts transport.Opti
 		if !found {
 			return nil
 		}
-		dialer := reverse.Dialer{Opts: opts}
+		dialer := reverse.Dialer{Opts: opts, NoShaping: !shaping}
 		tr := &http.Transport{}
 		tr.DialContext = func(ctx context.Context, _, addr string) (net.Conn, error) {
 			session, err := dialer.Dial(ctx, endpoint, token)

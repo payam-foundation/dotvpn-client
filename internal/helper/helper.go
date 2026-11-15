@@ -449,7 +449,7 @@ func (h *Helper) Settings() ipc.Settings {
 	}
 	return ipc.Settings{
 		FullTunnel: c.Tun.TunnelOn(), KillSwitch: c.Tun.KillSwitch,
-		DNS: c.Tun.DNS, DNSPreset: preset, DoH: c.Tun.DoH, SystemDNS: readSystemDNS(),
+		DNS: c.Tun.DNS, DNSPreset: preset, DoH: c.Tun.DoH, Shaping: c.Tun.ShapingOn(), SystemDNS: readSystemDNS(),
 		Pin: c.Pin, UseRelays: c.UseRelays, Carriers: selectableCarriers(c.Carriers),
 		DirectDomains: nonNil(c.Routing.DirectDomains), DirectCIDRs: nonNil(c.Routing.DirectCIDRs),
 		CrashReporting: c.CrashReporting,
@@ -468,6 +468,7 @@ func (h *Helper) SetSettings(s ipc.Settings) error {
 	c.Tun.SetEnabled(s.FullTunnel || s.KillSwitch) // a kill switch needs the tunnel
 	c.Tun.KillSwitch = s.KillSwitch
 	c.Tun.DoH = s.DoH
+	c.Tun.Shaping = &s.Shaping
 	if s.DNSPreset != "" {
 		c.Tun.DNSPreset = s.DNSPreset
 		c.Tun.DNS = dnsForPreset(s.DNSPreset, s.DNS) // empty for system; resolved at Connect

@@ -93,7 +93,13 @@ type TunConfig struct {
 	DNSPreset string `yaml:"dns_preset,omitempty"`
 	// DoH uses DNS-over-HTTPS for bypass/ECH lookups when supported.
 	DoH bool `yaml:"doh,omitempty"`
+	// Shaping pads relay records to fixed size buckets (frame.Quantize). Nil
+	// means on; it only covers the client-to-relay direction.
+	Shaping *bool `yaml:"shaping,omitempty"`
 }
+
+// ShapingOn is whether relay records are size-quantized.
+func (t TunConfig) ShapingOn() bool { return t.Shaping == nil || *t.Shaping }
 
 // TunnelOn is whether Connect should bring up the system tunnel.
 func (t TunConfig) TunnelOn() bool {
