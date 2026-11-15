@@ -326,7 +326,10 @@ jobs:
             choco install nsis -y --no-progress
           fi
           export PATH="$PATH:/c/Program Files (x86)/NSIS"
+          # project.nsi bundles Microsoft's evergreen WebView2 bootstrapper.
+          curl -sSfL -o MicrosoftEdgeWebview2Setup.exe https://go.microsoft.com/fwlink/p/?LinkId=2124703
           exe=$(cygpath -w "$RUNNER_TEMP/exe/Dot VPN.exe")
+          mkdir -p ../../../bin
           MSYS2_ARG_CONV_EXCL='*' makensis "-DARG_WAILS_AMD64_BINARY=$exe" "-DINFO_PRODUCTVERSION=$VERSION_NUM" project.nsi
           mkdir -p "$RUNNER_TEMP/installer" "$GITHUB_WORKSPACE/out"
           mv ../../../bin/*-installer.exe "$RUNNER_TEMP/installer/dotvpn-desktop_windows_amd64_installer.exe"
